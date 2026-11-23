@@ -7,23 +7,35 @@ export interface DeadlockIslandProps {
   caption: string;
 }
 
+function readCurrentTheme(): "dark" | "light" {
+  if (typeof document === "undefined") return "dark";
+  const explicit = document.documentElement.dataset.theme;
+  if (explicit === "dark" || explicit === "light") return explicit;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
 export function DeadlockIsland({ deadlock, caption }: DeadlockIslandProps) {
   const [theme, setTheme] = useState<"dark" | "light">("dark");
 
   useEffect(() => {
+    setTheme(readCurrentTheme());
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    setTheme(mq.matches ? "dark" : "light");
-    const onChange = (e: MediaQueryListEvent) => setTheme(e.matches ? "dark" : "light");
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
+    const sync = () => setTheme(readCurrentTheme());
+    mq.addEventListener("change", sync);
+    const obs = new MutationObserver(sync);
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => {
+      mq.removeEventListener("change", sync);
+      obs.disconnect();
+    };
   }, []);
 
   return (
     <figure className="blog-embed-card">
       <div className="blog-embed-head">
         <div className="blog-embed-meta">
-          <span className="blog-embed-pill">Interactive .xdl deadlock graph</span>
-          <span className="blog-embed-hint">Hover a session or table lock node to trace the cycle</span>
+          <span className="blog-embed-pill">Live .xdl deadlock graph</span>
+          <span className="blog-embed-hint">Hover a session or lock node to trace the cycle</span>
         </div>
         <a
           className="blog-embed-link"

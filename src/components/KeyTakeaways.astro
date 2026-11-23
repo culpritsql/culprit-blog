@@ -1,0 +1,18 @@
+---
+export interface Props {
+  label?: string;
+  items: string[];
+}
+
+const { label = "In brief", items } = Astro.props;
+---
+
+<aside class="ed-takeaways" aria-label={label}>
+  <div class="ed-takeaways-kicker">
+    <span class="ed-dot"></span>
+    <span>{label}</span>
+  </div>
+  <ul>
+    {items.map((item) => <li set:html={item} />)}
+  </ul>
+</aside>

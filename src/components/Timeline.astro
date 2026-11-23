@@ -1,0 +1,32 @@
+---
+export interface TimelineStep {
+  date: string;
+  title: string;
+  detail: string;
+  status?: "past" | "active" | "cutoff";
+}
+
+export interface Props {
+  steps: TimelineStep[];
+}
+
+const { steps } = Astro.props;
+---
+
+<div class="ed-timeline" role="list">
+  {
+    steps.map((step) => (
+      <div class={`ed-timeline-step ${step.status ?? "active"}`} role="listitem">
+        <div class="ed-timeline-rail">
+          <span class="ed-timeline-node" />
+          <span class="ed-timeline-line" />
+        </div>
+        <div class="ed-timeline-content">
+          <span class="ed-timeline-date">{step.date}</span>
+          <h4>{step.title}</h4>
+          <p>{step.detail}</p>
+        </div>
+      </div>
+    ))
+  }
+</div>

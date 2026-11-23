@@ -1,0 +1,15 @@
+---
+export interface Props {
+  title: string;
+  tone?: "amber" | "blue" | "green";
+}
+
+const { title, tone = "amber" } = Astro.props;
+---
+
+<aside class={`ed-callout ${tone}`}>
+  <div class="ed-callout-title">{title}</div>
+  <div class="ed-callout-body">
+    <slot />
+  </div>
+</aside>

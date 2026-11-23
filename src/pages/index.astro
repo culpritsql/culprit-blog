@@ -6,6 +6,8 @@ const posts = (await getCollection("blog")).sort(
   (a, b) => b.data.pubDate.valueOf() - a.data.pubDate.valueOf(),
 );
 
+const allTags = Array.from(new Set(posts.flatMap((p) => p.data.tags)));
+
 function formatDate(d: Date): string {
   return d.toLocaleDateString("en-US", {
     year: "numeric",
@@ -32,44 +34,94 @@ const jsonLd = {
   jsonLd={jsonLd}
 >
   <section class="blog-hero">
-    <div class="prose-wrap">
-      <p class="blog-kicker"><span class="blog-kicker-dot"></span> Engineering Notes</p>
+    <div class="hero-glow" aria-hidden="true"></div>
+    <div class="index-wrap">
+      <div class="blog-hero-top">
+        <p class="blog-kicker"><span class="blog-kicker-dot"></span> Engineering Notes</p>
+        <a class="rss-pill" href="/blog/rss.xml">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <path d="M4 11a9 9 0 0 1 9 9"></path>
+            <path d="M4 4a16 16 0 0 1 16 16"></path>
+            <circle cx="5" cy="19" r="1"></circle>
+          </svg>
+          <span>RSS</span>
+        </a>
+      </div>
       <h1>Database performance, plans, and telemetry.</h1>
       <p class="blog-hero-sub">
-        Notes from building Culprit SQL: reading execution plans, untangling deadlocks, and keeping production database telemetry useful without SaaS lock-in.
+        Field notes from building Culprit SQL: reading execution plans, untangling lock cycles, and running database telemetry without vendor lock-in.
       </p>
-      <div class="blog-hero-links">
-        <a href="/blog/rss.xml">RSS feed</a>
-        <span>·</span>
-        <a href="https://github.com/culpritsql/culprit-blog" rel="noopener">Edit on GitHub</a>
+
+      <div class="filter-bar" role="toolbar" aria-label="Filter posts by topic">
+        <button type="button" class="filter-chip active" data-filter="all">All notes ({posts.length})</button>
+        {
+          allTags.map((tag) => (
+            <button type="button" class="filter-chip" data-filter={tag}>
+              {tag}
+            </button>
+          ))
+        }
       </div>
     </div>
   </section>
 
-  <section class="prose-wrap post-list" aria-label="Blog posts">
+  <section class="index-wrap post-list" aria-label="Blog posts">
     {
-      posts.map((post) => (
-        <a class="post-card" href={`/blog/${post.id}/`}>
-          <div class="post-card-meta">
-            <time datetime={post.data.pubDate.toISOString().slice(0, 10)}>
-              {formatDate(post.data.pubDate)}
-            </time>
-            <span>·</span>
-            <span>{post.data.readingMinutes} min read</span>
-            <span>·</span>
-            <span>{post.data.author}</span>
+      posts.map((post, idx) => (
+        <a class="post-card" href={`/blog/${post.id}/`} data-tags={post.data.tags.join("|")}>
+          <div class="post-card-top">
+            <div class="post-card-meta">
+              <time datetime={post.data.pubDate.toISOString().slice(0, 10)}>
+                {formatDate(post.data.pubDate)}
+              </time>
+              <span class="meta-dot">·</span>
+              <span class="read-time">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10" />
+                  <polyline points="12 6 12 12 16 14" />
+                </svg>
+                {post.data.readingMinutes} min read
+              </span>
+            </div>
+            {idx === 0 && <span class="latest-badge">Latest</span>}
           </div>
+
           <h2>{post.data.title}</h2>
           <p>{post.data.description}</p>
-          {post.data.tags.length > 0 && (
+
+          <div class="post-card-foot">
             <div class="tag-row">
               {post.data.tags.map((tag) => (
                 <span class="tag">{tag}</span>
               ))}
             </div>
-          )}
+            <span class="read-cta">
+              Read note <span class="arrow">→</span>
+            </span>
+          </div>
         </a>
       ))
     }
   </section>
+
+  <script is:inline>
+    (function () {
+      var chips = document.querySelectorAll(".filter-chip");
+      var cards = document.querySelectorAll(".post-card");
+      chips.forEach(function (chip) {
+        chip.addEventListener("click", function () {
+          var target = chip.getAttribute("data-filter") || "all";
+          chips.forEach(function (c) {
+            c.classList.toggle("active", c === chip);
+          });
+          cards.forEach(function (card) {
+            var raw = card.getAttribute("data-tags") || "";
+            var list = raw ? raw.split("|") : [];
+            var show = target === "all" || list.indexOf(target) >= 0;
+            card.style.display = show ? "" : "none";
+          });
+        });
+      });
+    })();
+  </script>
 </BaseLayout>

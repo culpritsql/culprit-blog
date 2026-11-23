@@ -3,20 +3,26 @@ import { getCollection, render } from "astro:content";
 import BaseLayout from "../../layouts/BaseLayout.astro";
 
 export async function getStaticPaths() {
-  const posts = await getCollection("blog");
-  return posts.map((post) => ({
+  const posts = (await getCollection("blog")).sort(
+    (a, b) => b.data.pubDate.valueOf() - a.data.pubDate.valueOf(),
+  );
+  return posts.map((post, idx) => ({
     params: { slug: post.id },
-    props: { post },
+    props: {
+      post,
+      otherPost: posts.find((_p, i) => i !== idx) ?? null,
+    },
   }));
 }
 
-const { post } = Astro.props;
-const { Content } = await render(post);
+const { post, otherPost } = Astro.props;
+const { Content, headings } = await render(post);
+const tocHeadings = headings.filter((h) => h.depth === 2 || h.depth === 3);
 
 const isoDate = post.data.pubDate.toISOString().slice(0, 10);
 const humanDate = post.data.pubDate.toLocaleDateString("en-US", {
   year: "numeric",
-  month: "long",
+  month: "short",
   day: "numeric",
   timeZone: "UTC",
 });
@@ -48,45 +54,178 @@ const jsonLd = {
   canonicalPath={`/blog/${post.id}/`}
   ogType="article"
   publishedTime={post.data.pubDate.toISOString()}
+  showProgress={true}
   jsonLd={jsonLd}
 >
-  <article>
+  <article class="article-shell">
     <header class="article-header">
-      <div class="prose-wrap">
-        <a class="back-link" href="/blog/">← All posts</a>
+      <div class="hero-glow" aria-hidden="true"></div>
+      <div class="article-wrap">
+        <a class="back-link" href="/blog/">← Engineering Notes</a>
+
+        <div class="article-tags">
+          {post.data.tags.map((tag) => <span class="tag">{tag}</span>)}
+        </div>
+
         <h1>{post.data.title}</h1>
         <p class="article-lede">{post.data.description}</p>
+
         <div class="article-byline">
-          <div class="article-byline-left">
-            <span>{post.data.author}</span>
-            <span>·</span>
-            <time datetime={isoDate}>{humanDate}</time>
-            <span>·</span>
-            <span>{post.data.readingMinutes} min read</span>
+          <div class="author-chip">
+            <span class="author-avatar" aria-hidden="true">CP</span>
+            <div>
+              <strong>{post.data.author}</strong>
+              <div class="byline-sub">
+                <time datetime={isoDate}>{humanDate}</time>
+                <span>·</span>
+                <span>{post.data.readingMinutes} min read</span>
+              </div>
+            </div>
           </div>
-          <a class="raw-md-link" href={`/blog/${post.id}.md`} title="Plain Markdown version for developers and coding agents">
-            Raw .md
-          </a>
+
+          <div class="header-actions">
+            <button
+              type="button"
+              class="util-btn"
+              id="copy-md-btn"
+              data-md-url={`/blog/${post.id}.md`}
+              title="Copy clean Markdown for Claude, Cursor, or notes"
+            >
+              Copy Markdown
+            </button>
+            <a class="util-btn" href={`/blog/${post.id}.md`} title="Open plain Markdown version">
+              Raw .md
+            </a>
+          </div>
         </div>
       </div>
     </header>
 
-    <div class="article-prose">
-      <Content />
-    </div>
-
-    <div class="prose-wrap">
-      <aside class="article-foot-box" aria-label="Try Culprit SQL">
-        <h3>Try the tools mentioned in this post</h3>
-        <p>
-          Culprit SQL Studio, the VS Code extension, the client-side web plan viewer, and the ADX / ClickHouse collector are open source under the MIT license.
-        </p>
-        <div class="article-foot-actions">
-          <a class="btn primary" href="https://culpritsql.com/#download">Download Culprit SQL Studio</a>
-          <a class="btn ghost" href="https://explain.culpritsql.com">Open Culprit Explain</a>
-          <a class="btn ghost" href="https://marketplace.visualstudio.com/items?itemName=culpritsql.culprit-sql" rel="noopener">VS Code Extension</a>
+    <div class="article-wrap article-grid">
+      <div class="article-main">
+        <div class="article-prose">
+          <Content />
         </div>
-      </aside>
+
+        <aside class="article-foot-box" aria-label="Try Culprit SQL">
+          <div class="foot-box-kicker">Open Source · MIT License</div>
+          <h3>Try the tools from this note</h3>
+          <p>
+            Inspect plans locally in your browser, inside VS Code or Cursor, or connect read-only with Culprit SQL Studio.
+          </p>
+          <div class="article-foot-actions">
+            <a class="btn primary" href="https://culpritsql.com/#download">Download SQL Studio</a>
+            <a class="btn ghost" href="https://explain.culpritsql.com">Open Culprit Explain</a>
+            <a class="btn ghost" href="https://marketplace.visualstudio.com/items?itemName=culpritsql.culprit-sql" rel="noopener">
+              VS Code Extension
+            </a>
+          </div>
+        </aside>
+
+        {
+          otherPost && (
+            <a class="next-post-card" href={`/blog/${otherPost.id}/`}>
+              <span class="next-kicker">Read next →</span>
+              <strong>{otherPost.data.title}</strong>
+              <p>{otherPost.data.description}</p>
+            </a>
+          )
+        }
+      </div>
+
+      {
+        tocHeadings.length > 0 && (
+          <aside class="article-rail" aria-label="Table of contents">
+            <div class="rail-sticky">
+              <div class="toc-label">On this page</div>
+              <nav class="toc-nav">
+                {tocHeadings.map((h) => (
+                  <a href={`#${h.slug}`} class={`toc-link depth-${h.depth}`} data-toc-slug={h.slug}>
+                    {h.text}
+                  </a>
+                ))}
+              </nav>
+              <div class="rail-links">
+                <button type="button" class="rail-util" id="copy-link-btn">
+                  Copy article link
+                </button>
+                <a class="rail-util" href="/blog/rss.xml">Subscribe via RSS</a>
+              </div>
+            </div>
+          </aside>
+        )
+      }
     </div>
   </article>
+
+  <script is:inline>
+    (function () {
+      var copyMdBtn = document.getElementById("copy-md-btn");
+      if (copyMdBtn) {
+        copyMdBtn.addEventListener("click", function () {
+          var mdUrl = copyMdBtn.getAttribute("data-md-url");
+          if (!mdUrl) return;
+          fetch(mdUrl)
+            .then(function (r) {
+              return r.text();
+            })
+            .then(function (txt) {
+              return navigator.clipboard.writeText(txt);
+            })
+            .then(function () {
+              var orig = copyMdBtn.textContent;
+              copyMdBtn.textContent = "Copied .md!";
+              setTimeout(function () {
+                copyMdBtn.textContent = orig;
+              }, 1800);
+            });
+        });
+      }
+
+      var copyLinkBtn = document.getElementById("copy-link-btn");
+      if (copyLinkBtn) {
+        copyLinkBtn.addEventListener("click", function () {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(window.location.href).then(function () {
+              copyLinkBtn.textContent = "Copied link!";
+              setTimeout(function () {
+                copyLinkBtn.textContent = "Copy article link";
+              }, 1800);
+            });
+          }
+        });
+      }
+
+      var tocLinks = Array.from(document.querySelectorAll(".toc-link"));
+      if (tocLinks.length > 0 && "IntersectionObserver" in window) {
+        var targets = tocLinks
+          .map(function (a) {
+            var id = a.getAttribute("data-toc-slug");
+            return id ? document.getElementById(id) : null;
+          })
+          .filter(Boolean);
+
+        var setActive = function (id) {
+          tocLinks.forEach(function (a) {
+            a.classList.toggle("active", a.getAttribute("data-toc-slug") === id);
+          });
+        };
+        if (targets[0]) setActive(targets[0].id);
+
+        var observer = new IntersectionObserver(
+          function (entries) {
+            entries.forEach(function (entry) {
+              if (entry.isIntersecting) {
+                setActive(entry.target.id);
+              }
+            });
+          },
+          { rootMargin: "-90px 0px -68% 0px", threshold: 0 },
+        );
+        targets.forEach(function (el) {
+          observer.observe(el);
+        });
+      }
+    })();
+  </script>
 </BaseLayout>

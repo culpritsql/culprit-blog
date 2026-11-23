@@ -1,59 +1,125 @@
 ---
 title: "What I Use After Azure Data Studio Retired"
-description: "Microsoft retired Azure Data Studio in February 2026. Here is how I handle .sqlplan files, plan diffs, deadlocks, and multi-engine query tuning on macOS and in VS Code now."
+description: "Microsoft retired Azure Data Studio in February 2026. Here is how I inspect .sqlplan files, diff execution plans, and untangle deadlocks on macOS and in VS Code now."
 pubDate: 2026-11-23
 author: "Cristian Pufu"
-readingMinutes: 6
+readingMinutes: 5
 tags: ["SQL Server", "Azure Data Studio", "VS Code", "Execution Plans"]
 ---
 
-import MssqlPlanDiffEmbed from "../../components/MssqlPlanDiffEmbed.astro";
+import Callout from "../../components/Callout.astro";
+import KeyTakeaways from "../../components/KeyTakeaways.astro";
 import MssqlDeadlockEmbed from "../../components/MssqlDeadlockEmbed.astro";
+import MssqlPlanDiffEmbed from "../../components/MssqlPlanDiffEmbed.astro";
+import StatStrip from "../../components/StatStrip.astro";
+import WorkflowCards from "../../components/WorkflowCards.astro";
 
-Microsoft retired Azure Data Studio on February 28, 2026. If you work on Windows and spend most of your day administering SQL Server instances, SSMS 21 is still the right tool for backups, Availability Groups, and Extended Events setup. And if you just need to connect and run T-SQL queries inside an editor, Microsoft's `mssql` extension for VS Code covers the basics.
+<KeyTakeaways
+  label="TL;DR"
+  items={[
+    "<strong>Azure Data Studio retired on February 28, 2026.</strong> VS Code's <code>mssql</code> extension handles running T-SQL fine, and SSMS 21 covers Windows server administration.",
+    "<strong>The missing piece on macOS and Linux is plan and deadlock inspection:</strong> opening <code>.sqlplan</code> or <code>.xdl</code> captures offline, comparing Before/After plans, and jumping between SQL Server and PostgreSQL.",
+    "<strong>My current stack uses one Rust + WebAssembly parser across three places:</strong> a VS Code / Cursor extension, a zero-upload browser tab, and Culprit SQL Studio."
+  ]}
+/>
 
-Where things got awkward for me (working mostly on macOS, across services that mix Azure SQL, SQL Server, and PostgreSQL) was everything around execution plans, deadlocks, and query regressions.
+Microsoft retired Azure Data Studio on February 28, 2026. For years it was my default recommendation whenever someone worked with SQL Server or Azure SQL on a Mac and didn't want to keep a Windows VM around just for SSMS.
 
-## What actually broke in day-to-day query work
+<Callout title="Where SSMS and VS Code mssql still fit" tone="blue">
+  <p>
+    If you are on Windows doing server administration (backups, Availability Groups, Extended Events wizards), keep SSMS 21 installed. And for writing ad-hoc T-SQL in an editor, Microsoft's <code>mssql</code> extension in VS Code works fine.
+  </p>
+</Callout>
 
-Three things kept coming up after switching away from Azure Data Studio:
+## Three gaps that kept slowing me down
 
-1. **Opening `.sqlplan` and `.xdl` files from tickets or Slack.** Someone attaches a 2 MB `.sqlplan` or an Extended Events `.xdl` deadlock capture to an incident. On a Mac, you don't have SSMS. Reading raw Showplan XML in a text buffer (`<RelOp NodeId="7" PhysicalOp="Clustered Index Seek" Lookup="1">`) gets old fast, and dropping production query plans into a third-party website that uploads them to someone else's server is usually a non-starter for security reasons.
-2. **Comparing Before and After plans.** Even in ADS and SSMS, tuning a slow query usually meant staring at two visual trees in separate tabs and trying to spot what moved. Did the join order flip, did an estimate drift by 100x because of a compiled parameter value, or did a Key Lookup disappear?
-3. **Context-switching between SQL Server and PostgreSQL.** Most backend teams I work with don't run a single database engine anymore. One service is on Azure SQL, the next is on RDS PostgreSQL, and local tests hit SQLite. Having completely separate plan viewers and mental models for `.sqlplan` XML and `EXPLAIN (ANALYZE, BUFFERS)` wastes time when you just want to know which operator spent the time.
+Once Azure Data Studio went away, the friction showed up in performance debugging rather than basic querying:
 
-Over the past few months we pulled the plan parser, plan differ, and deadlock analyzer out of [Culprit SQL Studio](https://culpritsql.com) into standalone Rust + WebAssembly packages so they run in VS Code, in a browser tab, and in the desktop app using the exact same logic.
+- **Offline `.sqlplan` and `.xdl` files on macOS.** Someone drops a 2 MB `.sqlplan` or an Extended Events `.xdl` deadlock file into Slack or Jira. Reading nested `<RelOp>` XML in a text buffer is painful, and uploading production query plans to a public pastebin is usually blocked by security policy.
+- **Tab-flipping to compare two plans.** After adding an `INCLUDE` column or removing a join hint, staring at two big trees in separate tabs makes it easy to miss why one plan is faster or whether a compiled parameter value skewed row estimates.
+- **Different tools for every engine.** Most backend teams I work with touch Azure SQL in one service, PostgreSQL in the next, and SQLite in local tests. Learning a separate visualizer per database wastes time when you just want to see which operator burned the I/O.
 
-## Side-by-side `.sqlplan` comparison
+To fix this for myself, we extracted the parser, plan differ, and deadlock analyzer from [Culprit SQL Studio](https://culpritsql.com) into standalone WebAssembly packages.
 
-Here is a concrete example from a SQL Server checkout query. The baseline plan seeks `ix_orders_status_created`, finds 18,400 matching rows, and then executes a Key Lookup against `pk_orders` 18,400 times (`56,120` logical reads, `184 ms`) to fetch `customer_id`, `total_cents`, and `shipping_notes` before `TOP 50` can finish. Adding those columns to `INCLUDE` drops the query to `3 ms` and `157` logical reads.
+## Comparing `.sqlplan` files side by side
 
-The diagram below is the actual `@culpritsql/plan-viewer` React component, not a screenshot. You can click any node to inspect its runtime counters or toggle between Time, Cost, Rows, and Reads:
+Take a typical SQL Server checkout query. The baseline plan seeks `ix_orders_status_created`, matches `18,400` rows, and then runs a Key Lookup on `pk_orders` 18,400 times before `TOP 50` finishes.
+
+Adding the three fetched columns (`customer_id`, `total_cents`, `shipping_notes`) to `INCLUDE` removes the lookup completely:
+
+<StatStrip
+  stats={[
+    { value: "184 ms -> 3 ms", label: "Measured elapsed time (61x faster)", tone: "green" },
+    { value: "56,120 -> 157", label: "Logical 8 KB page reads", tone: "green" },
+    { value: "18,400 -> 0", label: "Key Lookups against pk_orders", tone: "amber" }
+  ]}
+/>
+
+The viewer below is the live `@culpritsql/plan-viewer` React component, not a static image. Click any operator or switch between **Diagram** and **Tree**:
 
 <MssqlPlanDiffEmbed />
 
-Instead of making you hunt through XML attributes, the structural diff matches operators across both trees and calls out the access-path change directly.
+## Reading `.xdl` deadlock cycles without SSMS
 
-## Reading `.xdl` deadlock captures without SSMS
+Deadlock XML captures had the same problem outside Windows. All the evidence is inside the `.xdl` file (`<victim-list>`, `<inputbuf>`, `hobtid` key locks, hold vs wait modes), but reconstructing the cycle by hand during an outage is error-prone.
 
-Deadlocks had the exact same problem on macOS and Linux. SQL Server's XML deadlock report has everything you need (`<victim-list>`, `<process-list>`, `<inputbuf>`, `hobtid` key locks, lock modes), but reading a multi-process lock cycle out of raw XML under incident pressure is error-prone.
-
-Here is how the same viewer renders a two-session `.xdl` capture where `checkout-worker` (SPID 74) and `fulfillment-sync` (SPID 112) update `dbo.orders` and `dbo.inventory` in opposite order:
+Here is a two-session capture where `checkout-worker` (SPID 74) and `fulfillment-sync` (SPID 112) lock `dbo.orders` and `dbo.inventory` in opposite order:
 
 <MssqlDeadlockEmbed />
 
-The same parser also reads PostgreSQL `ERROR: deadlock detected` server log blocks and MySQL / MariaDB `SHOW ENGINE INNODB STATUS` (`LATEST DETECTED DEADLOCK`) sections, so you don't need a separate tool per engine.
+The same parser also reads PostgreSQL `ERROR: deadlock detected` server logs and MySQL / MariaDB `SHOW ENGINE INNODB STATUS` dumps.
 
-## How my setup looks now
+## How my setup splits across tools
 
-Depending on what I am doing, I use one of three entry points, all backed by the same Rust parser:
+All three entry points run the exact same Rust parser locally, so I pick whichever matches where the file already lives:
 
-| When I need to... | What I use |
-| :--- | :--- |
-| Open `.sqlplan`, `.explain.json`, or `.xdl` files in a repo, compare two plan files in Explorer, or catch risky SQL migrations while coding | **[Culprit SQL for VS Code / Cursor](https://marketplace.visualstudio.com/items?itemName=culpritsql.culprit-sql)** (`culpritsql.culprit-sql`, also on Open VSX). Double-clicking a plan or `.xdl` file opens the viewer directly, `Cmd+Shift+E` opens a scratch Studio tab, and `.sql` / TypeScript `sql` templates get inline warnings for blocking `CREATE INDEX` or missing `WHERE` clauses. |
-| Look at a plan from Slack or send a redacted link to a teammate | **[explain.culpritsql.com](https://explain.culpritsql.com)**. Runs 100% locally in WebAssembly inside your browser tab (nothing is uploaded). Clicking **Share Link** scrubs SQL string and numeric literals by default, compresses the plan with `deflate-raw`, and puts it in the `#s=z1...` URL hash. |
-| Connect to Azure SQL, SQL Server, PostgreSQL, or MySQL to find *which* queries are slow in the first place | **[Culprit SQL Studio](https://culpritsql.com)** (native macOS, Linux, and Windows app + CLI). It imports saved connections directly from Azure Data Studio's config file, signs in to Azure SQL using your existing `az login` Entra session, reads Query Store / DMVs / `pg_stat_statements` read-only, and ranks findings by share of database time. |
+<WorkflowCards
+  cards={[
+    {
+      step: "01",
+      when: "In the repo",
+      tool: "Culprit SQL for VS Code",
+      href: "https://marketplace.visualstudio.com/items?itemName=culpritsql.culprit-sql",
+      points: [
+        "Double-click <code>.sqlplan</code>, <code>.explain.json</code>, or <code>.xdl</code> files to open the diagram.",
+        "Select two plan files in Explorer to diff Before vs After.",
+        "Inline warnings on risky SQL migrations before opening a PR."
+      ]
+    },
+    {
+      step: "02",
+      when: "From Slack or tickets",
+      tool: "explain.culpritsql.com",
+      href: "https://explain.culpritsql.com",
+      points: [
+        "100% client-side WebAssembly: plans never leave your browser tab.",
+        "<strong>Share Link</strong> scrubs SQL literals and packs the plan into a <code>#s=z1...</code> URL hash.",
+        "Supports SQL Server, Postgres, MySQL, MariaDB, YugabyteDB, and SQLite."
+      ]
+    },
+    {
+      step: "03",
+      when: "Finding what is slow",
+      tool: "Culprit SQL Studio",
+      href: "https://culpritsql.com",
+      points: [
+        "Native macOS, Linux, and Windows app + CLI.",
+        "Imports saved connections straight out of Azure Data Studio's config.",
+        "Reads Query Store and <code>pg_stat_statements</code> read-only, plus 27 MCP tools for Claude Code and Cursor."
+      ]
+    }
+  ]}
+/>
 
-One small bonus if you use Claude Code, Cursor, or Codex: running `culprit mcp` exposes 27 read-only tools over your saved connections, so your coding agent can inspect Query Store regressions, pull execution plans, or test hypothetical indexes (`--with-index` via HypoPG on Postgres) without ever seeing raw database credentials.
+## Coding agents via MCP
 
-Everything above is MIT-licensed on [GitHub (@culpritsql)](https://github.com/culpritsql). If you hit a `.sqlplan` or deadlock capture that renders oddly, open an issue with a redacted repro and I will fix the parser.
+If you use Claude Code, Cursor, or Codex, two commands wire your saved connections into the agent without exposing raw passwords:
+
+```sh
+claude mcp add culprit -- culprit mcp
+culprit agent init --connection shop
+```
+
+From there, the agent can inspect Query Store regressions, pull execution plans, or test a proposed PostgreSQL index via HypoPG (`--with-index`) while read-only guardrails stay enforced locally.
+
+Everything is MIT-licensed on [GitHub (@culpritsql)](https://github.com/culpritsql). If you run into a `.sqlplan` or deadlock capture that trips the parser, open an issue with a redacted snippet and I will fix it.

@@ -11,23 +11,35 @@ export interface PlanDiffIslandProps {
   caption: string;
 }
 
+function readCurrentTheme(): "dark" | "light" {
+  if (typeof document === "undefined") return "dark";
+  const explicit = document.documentElement.dataset.theme;
+  if (explicit === "dark" || explicit === "light") return explicit;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
 export function PlanDiffIsland({ a, b, diff, nameA, nameB, caption }: PlanDiffIslandProps) {
   const [theme, setTheme] = useState<"dark" | "light">("dark");
 
   useEffect(() => {
+    setTheme(readCurrentTheme());
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    setTheme(mq.matches ? "dark" : "light");
-    const onChange = (e: MediaQueryListEvent) => setTheme(e.matches ? "dark" : "light");
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
+    const sync = () => setTheme(readCurrentTheme());
+    mq.addEventListener("change", sync);
+    const obs = new MutationObserver(sync);
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => {
+      mq.removeEventListener("change", sync);
+      obs.disconnect();
+    };
   }, []);
 
   return (
     <figure className="blog-embed-card">
       <div className="blog-embed-head">
         <div className="blog-embed-meta">
-          <span className="blog-embed-pill">Interactive .sqlplan diff</span>
-          <span className="blog-embed-hint">Click any operator or toggle Time / Cost / Rows / Reads</span>
+          <span className="blog-embed-pill">Live .sqlplan diff</span>
+          <span className="blog-embed-hint">Click any operator or switch Diagram / Tree</span>
         </div>
         <a
           className="blog-embed-link"

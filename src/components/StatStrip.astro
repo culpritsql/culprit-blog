@@ -1,0 +1,24 @@
+---
+export interface StatItem {
+  value: string;
+  label: string;
+  tone?: "green" | "amber" | "default";
+}
+
+export interface Props {
+  stats: StatItem[];
+}
+
+const { stats } = Astro.props;
+---
+
+<div class="ed-stat-strip">
+  {
+    stats.map((s) => (
+      <div class={`ed-stat-box ${s.tone ?? "default"}`}>
+        <strong>{s.value}</strong>
+        <span>{s.label}</span>
+      </div>
+    ))
+  }
+</div>

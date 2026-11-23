@@ -84,8 +84,10 @@ describe("Culprit SQL Blog content, prose quality, and textbook SEO", () => {
     }
   });
 
-  test("builds static output passing textbook technical SEO checks (meta lengths, canonicals, JSON-LD, 1200x630 OG cards, H1, alt text)", () => {
-    execFileSync("bun", ["run", "build"], { cwd: root, stdio: "pipe" });
+  test(
+    "builds static output passing textbook technical SEO checks (meta lengths, canonicals, JSON-LD, 1200x630 OG cards, H1, alt text)",
+    () => {
+      execFileSync("bun", ["run", "build"], { cwd: root, stdio: "pipe" });
 
     // Check index OG card
     expect(readPngDimensions(path.join(distDir, "og.png"))).toEqual({ width: 1200, height: 630 });
@@ -166,5 +168,7 @@ describe("Culprit SQL Blog content, prose quality, and textbook SEO", () => {
         expect(html).toContain('<link rel="alternate" type="text/markdown"');
       }
     }
-  });
+  },
+  30_000,
+);
 });

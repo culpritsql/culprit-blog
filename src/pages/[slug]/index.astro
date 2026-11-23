@@ -20,6 +20,8 @@ const { Content, headings } = await render(post);
 const tocHeadings = headings.filter((h) => h.depth === 2 || h.depth === 3);
 
 const isoDate = post.data.pubDate.toISOString().slice(0, 10);
+const publishedIso = post.data.pubDate.toISOString();
+const modifiedIso = (post.data.updatedDate ?? post.data.pubDate).toISOString();
 const humanDate = post.data.pubDate.toLocaleDateString("en-US", {
   year: "numeric",
   month: "short",
@@ -27,33 +29,74 @@ const humanDate = post.data.pubDate.toLocaleDateString("en-US", {
   timeZone: "UTC",
 });
 
+const postUrl = `https://culpritsql.com/blog/${post.id}/`;
+const ogImagePath = `/blog/${post.id}/og.png`;
+const ogImageUrl = `https://culpritsql.com${ogImagePath}`;
+
 const jsonLd = {
   "@context": "https://schema.org",
-  "@type": "BlogPosting",
-  headline: post.data.title,
-  description: post.data.description,
-  datePublished: isoDate,
-  dateModified: (post.data.updatedDate ?? post.data.pubDate).toISOString().slice(0, 10),
-  author: {
-    "@type": "Person",
-    name: post.data.author,
-    url: "https://github.com/cristipufu",
-  },
-  publisher: {
-    "@type": "Organization",
-    name: "Culprit SQL",
-    url: "https://culpritsql.com",
-  },
-  mainEntityOfPage: `https://culpritsql.com/blog/${post.id}/`,
+  "@graph": [
+    {
+      "@type": "BlogPosting",
+      "@id": `${postUrl}#article`,
+      headline: post.data.title,
+      description: post.data.seoDescription,
+      image: {
+        "@type": "ImageObject",
+        url: ogImageUrl,
+        width: 1200,
+        height: 630,
+      },
+      datePublished: publishedIso,
+      dateModified: modifiedIso,
+      inLanguage: "en-US",
+      isAccessibleForFree: true,
+      articleSection: "Database Performance",
+      keywords: post.data.keywords.join(", "),
+      timeRequired: `PT${post.data.readingMinutes}M`,
+      author: {
+        "@type": "Person",
+        name: post.data.author,
+        url: "https://github.com/cristipufu",
+      },
+      publisher: {
+        "@type": "Organization",
+        name: "Culprit SQL",
+        url: "https://culpritsql.com/",
+        logo: {
+          "@type": "ImageObject",
+          url: "https://culpritsql.com/apple-touch-icon.png",
+        },
+      },
+      mainEntityOfPage: {
+        "@type": "WebPage",
+        "@id": postUrl,
+      },
+    },
+    {
+      "@type": "BreadcrumbList",
+      itemListElement: [
+        { "@type": "ListItem", position: 1, name: "Culprit SQL Studio", item: "https://culpritsql.com/" },
+        { "@type": "ListItem", position: 2, name: "Blog", item: "https://culpritsql.com/blog/" },
+        { "@type": "ListItem", position: 3, name: post.data.title, item: postUrl },
+      ],
+    },
+  ],
 };
 ---
 
 <BaseLayout
-  title={`${post.data.title} | Culprit SQL Blog`}
-  description={post.data.description}
+  title={post.data.seoTitle}
+  description={post.data.seoDescription}
   canonicalPath={`/blog/${post.id}/`}
+  ogImagePath={ogImagePath}
+  ogImageAlt={`${post.data.title} - Culprit SQL Engineering Blog`}
   ogType="article"
-  publishedTime={post.data.pubDate.toISOString()}
+  author={post.data.author}
+  publishedTime={publishedIso}
+  modifiedTime={modifiedIso}
+  tags={post.data.tags}
+  markdownPath={`/blog/${post.id}.md`}
   showProgress={true}
   jsonLd={jsonLd}
 >
@@ -61,7 +104,11 @@ const jsonLd = {
     <header class="article-header">
       <div class="hero-glow" aria-hidden="true"></div>
       <div class="article-wrap">
-        <a class="back-link" href="/blog/">← Engineering Notes</a>
+        <nav class="breadcrumb-nav" aria-label="Breadcrumb">
+          <a href="https://culpritsql.com/">Culprit SQL</a>
+          <span aria-hidden="true">/</span>
+          <a href="/blog/">Blog</a>
+        </nav>
 
         <div class="article-tags">
           {post.data.tags.map((tag) => <span class="tag">{tag}</span>)}

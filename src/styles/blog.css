@@ -557,6 +557,46 @@ li {
   border-bottom: 1px solid var(--line);
 }
 
+.breadcrumb-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 560;
+  color: var(--text-3);
+  margin-bottom: 18px;
+}
+
+.breadcrumb-nav a {
+  color: var(--text-3);
+}
+
+.breadcrumb-nav a:hover {
+  color: var(--text);
+  text-decoration: none;
+}
+
+.heading-anchor {
+  margin-left: 8px;
+  opacity: 0;
+  color: var(--text-3);
+  font-weight: 500;
+  text-decoration: none;
+  transition: opacity 120ms ease;
+}
+
+.article-prose h2:hover .heading-anchor,
+.article-prose h3:hover .heading-anchor,
+.heading-anchor:focus {
+  opacity: 0.75;
+}
+
+.heading-anchor:hover {
+  opacity: 1 !important;
+  color: var(--accent);
+  text-decoration: none;
+}
+
 .back-link {
   display: inline-flex;
   align-items: center;

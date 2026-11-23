@@ -2,11 +2,11 @@
 import { getMssqlDeadlockDemo } from "../lib/demoArtifacts";
 import { DeadlockIsland } from "./DeadlockIsland";
 
-const deadlock = await getMssqlDeadlockDemo();
+const { deadlock, explainUrl } = await getMssqlDeadlockDemo();
 const caption =
   "Live @culpritsql/plan-viewer component: parsed from a SQL Server Extended Events .xdl capture. Session 74 and session 112 update dbo.orders and dbo.inventory in opposite order.";
 ---
 
 <div class="blog-wide">
-  <DeadlockIsland client:visible deadlock={deadlock} caption={caption} />
+  <DeadlockIsland client:visible deadlock={deadlock} explainUrl={explainUrl} caption={caption} />
 </div>

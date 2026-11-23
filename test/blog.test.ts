@@ -167,6 +167,10 @@ describe("Culprit SQL Blog content, prose quality, and textbook SEO", () => {
         expect(html).toContain('<meta property="article:modified_time"');
         expect(html).toContain('<link rel="alternate" type="text/markdown"');
       }
+      if (r.htmlFile.includes("after-azure-data-studio")) {
+        expect(html).toContain("https://explain.culpritsql.com/compare#s=z1.");
+        expect(html).toContain("https://explain.culpritsql.com/deadlock#s=z1.");
+      }
     }
   },
   30_000,

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 export interface DeadlockIslandProps {
   deadlock: Deadlock;
+  explainUrl: string;
   caption: string;
 }
 
@@ -14,7 +15,7 @@ function readCurrentTheme(): "dark" | "light" {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
-export function DeadlockIsland({ deadlock, caption }: DeadlockIslandProps) {
+export function DeadlockIsland({ deadlock, explainUrl, caption }: DeadlockIslandProps) {
   const [theme, setTheme] = useState<"dark" | "light">("dark");
 
   useEffect(() => {
@@ -39,7 +40,7 @@ export function DeadlockIsland({ deadlock, caption }: DeadlockIslandProps) {
         </div>
         <a
           className="blog-embed-link"
-          href="https://explain.culpritsql.com/deadlock"
+          href={explainUrl}
           target="_blank"
           rel="noopener"
         >

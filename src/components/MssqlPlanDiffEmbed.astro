@@ -2,7 +2,7 @@
 import { getMssqlPlanDiffDemo } from "../lib/demoArtifacts";
 import { PlanDiffIsland } from "./PlanDiffIsland";
 
-const { a, b, diff, nameA, nameB } = await getMssqlPlanDiffDemo();
+const { a, b, diff, nameA, nameB, explainUrl } = await getMssqlPlanDiffDemo();
 const caption =
   "Live @culpritsql/plan-viewer component: SQL Server drops from 184 ms (56,120 logical reads across 18,400 Key Lookups) to 3 ms (157 logical reads) once the status + created_at index includes the selected columns.";
 ---
@@ -15,6 +15,7 @@ const caption =
     diff={diff}
     nameA={nameA}
     nameB={nameB}
+    explainUrl={explainUrl}
     caption={caption}
   />
 </div>

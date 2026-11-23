@@ -1,10 +1,17 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import * as zlib from "node:zlib";
 import * as plans from "@culpritsql/plans";
 import type { Deadlock, Plan, PlanDiff } from "@culpritsql/plan-viewer";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+function buildExplainShareUrl(route: "compare" | "deadlock", payload: Record<string, unknown>): string {
+  const raw = Buffer.from(JSON.stringify(payload), "utf8");
+  const compressed = zlib.deflateRawSync(raw, { level: 9 });
+  return `https://explain.culpritsql.com/${route}#s=z1.${compressed.toString("base64url")}`;
+}
 
 let wasmReady = false;
 
@@ -138,6 +145,7 @@ export async function getMssqlPlanDiffDemo(): Promise<{
   diff: PlanDiff;
   nameA: string;
   nameB: string;
+  explainUrl: string;
 }> {
   await ensureNodeWasm();
   const nameA = "Before (18.4K Key Lookups)";
@@ -145,11 +153,29 @@ export async function getMssqlPlanDiffDemo(): Promise<{
   const a = plans.parsePlan(MSSQL_BEFORE_KEY_LOOKUP_XML, "mssql");
   const b = plans.parsePlan(MSSQL_AFTER_COVERING_XML, "mssql");
   const diff = plans.diffPlans(a, nameA, b, nameB);
-  return { a, b, diff, nameA, nameB };
+  const explainUrl = buildExplainShareUrl("compare", {
+    v: 1,
+    m: "compare",
+    e: "mssql",
+    na: nameA,
+    pa: MSSQL_BEFORE_KEY_LOOKUP_XML,
+    nb: nameB,
+    pb: MSSQL_AFTER_COVERING_XML,
+  });
+  return { a, b, diff, nameA, nameB, explainUrl };
 }
 
-export async function getMssqlDeadlockDemo(): Promise<Deadlock> {
+export async function getMssqlDeadlockDemo(): Promise<{
+  deadlock: Deadlock;
+  explainUrl: string;
+}> {
   await ensureNodeWasm();
   const list = plans.parseDeadlock(MSSQL_DEADLOCK_XML);
-  return list[0]!;
+  const explainUrl = buildExplainShareUrl("deadlock", {
+    v: 1,
+    m: "deadlock",
+    t: "Checkout vs Fulfillment (.xdl)",
+    d: MSSQL_DEADLOCK_XML,
+  });
+  return { deadlock: list[0]!, explainUrl };
 }

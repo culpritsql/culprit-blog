@@ -8,6 +8,7 @@ export interface PlanDiffIslandProps {
   diff: PlanDiff;
   nameA: string;
   nameB: string;
+  explainUrl: string;
   caption: string;
 }
 
@@ -18,7 +19,7 @@ function readCurrentTheme(): "dark" | "light" {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
-export function PlanDiffIsland({ a, b, diff, nameA, nameB, caption }: PlanDiffIslandProps) {
+export function PlanDiffIsland({ a, b, diff, nameA, nameB, explainUrl, caption }: PlanDiffIslandProps) {
   const [theme, setTheme] = useState<"dark" | "light">("dark");
 
   useEffect(() => {
@@ -43,7 +44,7 @@ export function PlanDiffIsland({ a, b, diff, nameA, nameB, caption }: PlanDiffIs
         </div>
         <a
           className="blog-embed-link"
-          href="https://explain.culpritsql.com/compare"
+          href={explainUrl}
           target="_blank"
           rel="noopener"
         >

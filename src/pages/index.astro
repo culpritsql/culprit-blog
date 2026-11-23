@@ -1,0 +1,75 @@
+---
+import { getCollection } from "astro:content";
+import BaseLayout from "../layouts/BaseLayout.astro";
+
+const posts = (await getCollection("blog")).sort(
+  (a, b) => b.data.pubDate.valueOf() - a.data.pubDate.valueOf(),
+);
+
+function formatDate(d: Date): string {
+  return d.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "Blog",
+  name: "Culprit SQL Engineering Blog",
+  url: "https://culpritsql.com/blog/",
+  description:
+    "Engineering notes on SQL execution plans, deadlocks, query regressions, and production telemetry across SQL Server, PostgreSQL, MySQL, and SQLite.",
+};
+---
+
+<BaseLayout
+  title="Engineering Notes | Culprit SQL Blog"
+  description="Practical notes on query plans, deadlocks, Azure SQL telemetry, and database debugging across SQL Server, PostgreSQL, MySQL, and SQLite."
+  canonicalPath="/blog/"
+  jsonLd={jsonLd}
+>
+  <section class="blog-hero">
+    <div class="prose-wrap">
+      <p class="blog-kicker"><span class="blog-kicker-dot"></span> Engineering Notes</p>
+      <h1>Database performance, plans, and telemetry.</h1>
+      <p class="blog-hero-sub">
+        Notes from building Culprit SQL: reading execution plans, untangling deadlocks, and keeping production database telemetry useful without SaaS lock-in.
+      </p>
+      <div class="blog-hero-links">
+        <a href="/blog/rss.xml">RSS feed</a>
+        <span>·</span>
+        <a href="https://github.com/culpritsql/culprit-blog" rel="noopener">Edit on GitHub</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="prose-wrap post-list" aria-label="Blog posts">
+    {
+      posts.map((post) => (
+        <a class="post-card" href={`/blog/${post.id}/`}>
+          <div class="post-card-meta">
+            <time datetime={post.data.pubDate.toISOString().slice(0, 10)}>
+              {formatDate(post.data.pubDate)}
+            </time>
+            <span>·</span>
+            <span>{post.data.readingMinutes} min read</span>
+            <span>·</span>
+            <span>{post.data.author}</span>
+          </div>
+          <h2>{post.data.title}</h2>
+          <p>{post.data.description}</p>
+          {post.data.tags.length > 0 && (
+            <div class="tag-row">
+              {post.data.tags.map((tag) => (
+                <span class="tag">{tag}</span>
+              ))}
+            </div>
+          )}
+        </a>
+      ))
+    }
+  </section>
+</BaseLayout>

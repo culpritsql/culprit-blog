@@ -1,0 +1,92 @@
+---
+import { getCollection, render } from "astro:content";
+import BaseLayout from "../../layouts/BaseLayout.astro";
+
+export async function getStaticPaths() {
+  const posts = await getCollection("blog");
+  return posts.map((post) => ({
+    params: { slug: post.id },
+    props: { post },
+  }));
+}
+
+const { post } = Astro.props;
+const { Content } = await render(post);
+
+const isoDate = post.data.pubDate.toISOString().slice(0, 10);
+const humanDate = post.data.pubDate.toLocaleDateString("en-US", {
+  year: "numeric",
+  month: "long",
+  day: "numeric",
+  timeZone: "UTC",
+});
+
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  headline: post.data.title,
+  description: post.data.description,
+  datePublished: isoDate,
+  dateModified: (post.data.updatedDate ?? post.data.pubDate).toISOString().slice(0, 10),
+  author: {
+    "@type": "Person",
+    name: post.data.author,
+    url: "https://github.com/cristipufu",
+  },
+  publisher: {
+    "@type": "Organization",
+    name: "Culprit SQL",
+    url: "https://culpritsql.com",
+  },
+  mainEntityOfPage: `https://culpritsql.com/blog/${post.id}/`,
+};
+---
+
+<BaseLayout
+  title={`${post.data.title} | Culprit SQL Blog`}
+  description={post.data.description}
+  canonicalPath={`/blog/${post.id}/`}
+  ogType="article"
+  publishedTime={post.data.pubDate.toISOString()}
+  jsonLd={jsonLd}
+>
+  <article>
+    <header class="article-header">
+      <div class="prose-wrap">
+        <a class="back-link" href="/blog/">← All posts</a>
+        <h1>{post.data.title}</h1>
+        <p class="article-lede">{post.data.description}</p>
+        <div class="article-byline">
+          <div class="article-byline-left">
+            <span>{post.data.author}</span>
+            <span>·</span>
+            <time datetime={isoDate}>{humanDate}</time>
+            <span>·</span>
+            <span>{post.data.readingMinutes} min read</span>
+          </div>
+          <a class="raw-md-link" href={`/blog/${post.id}.md`} title="Plain Markdown version for developers and coding agents">
+            Raw .md
+          </a>
+        </div>
+      </div>
+    </header>
+
+    <div class="article-prose">
+      <Content />
+    </div>
+
+    <div class="prose-wrap">
+      <aside class="article-foot-box" aria-label="Try Culprit SQL">
+        <h3>Try the tools mentioned in this post</h3>
+        <p>
+          Culprit SQL Studio, the VS Code extension, the client-side web plan viewer, and the ADX / ClickHouse collector are open source under the MIT license.
+        </p>
+        <div class="article-foot-actions">
+          <a class="btn primary" href="https://culpritsql.com/#download">Download Culprit SQL Studio</a>
+          <a class="btn ghost" href="https://explain.culpritsql.com">Open Culprit Explain</a>
+          <a class="btn ghost" href="https://marketplace.visualstudio.com/items?itemName=culpritsql.culprit-sql" rel="noopener">VS Code Extension</a>
+        </div>
+      </aside>
+    </div>
+  </article>
+</BaseLayout>

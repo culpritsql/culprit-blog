@@ -1,0 +1,90 @@
+---
+title: "Azure SQL Database Watcher Is Retiring Before GA: Keeping Your ADX Setup"
+description: "Microsoft blocked new Azure SQL Database Watchers on November 9, 2026 and will shut down existing ones on April 30, 2027. Here is how to keep database telemetry and root-cause alerts flowing into your own ADX cluster."
+pubDate: 2026-11-22
+author: "Cristian Pufu"
+readingMinutes: 7
+tags: ["Azure SQL", "ADX", "KQL", "Telemetry", "PostgreSQL"]
+---
+
+On November 9, 2026, Microsoft blocked creating new **Database Watcher** instances for Azure SQL and froze configuration changes on existing ones. On **April 30, 2027**, existing watchers will stop collecting data and cannot be restarted. Database Watcher is retiring in preview without reaching general availability, and Microsoft's official replacement is **Database Hub in Microsoft Fabric**.
+
+If your organization has already standardized on Microsoft Fabric capacities, Database Hub is the path of least resistance. Microsoft manages the storage and adds SQL Server on Azure VMs and Azure Arc alongside Azure SQL.
+
+For a lot of engineering teams, though, Database Watcher was attractive for the exact opposite reason: **the data landed in your own Azure Data Explorer (ADX) cluster.**
+
+## Why losing the ADX path hurts
+
+Teams who adopted Database Watcher usually did it because ADX (Kusto) was already the backbone of their observability stack:
+
+1. **One query language and one alert pipeline.** When application logs, Kubernetes events, and Azure SQL telemetry live in the same ADX cluster, you write KQL in one place, version your schemas and dashboards in Git/Terraform, and wire Azure Monitor Scheduled Query Rules or Grafana straight to PagerDuty or Slack. Moving database monitoring into Fabric splits your operational telemetry across two different platforms and permission models.
+2. **Orphaned ADX clusters keep billing.** Stopping a Database Watcher resource on April 30, 2027 stops ingestion, not the underlying ADX cluster or retention storage you provisioned for it.
+3. **Production stacks rarely run only Azure SQL.** Even before retirement, Database Watcher only covered Azure SQL Database, Elastic Pools, and Managed Instance. If half your services run on PostgreSQL, MySQL, MariaDB, YugabyteDB, or self-managed SQL Server on VMs, you still needed a second telemetry pipeline anyway.
+
+## The deeper 2 AM problem with raw DMV tables
+
+While building [Culprit SQL](https://culpritsql.com), I spent a lot of time looking at what happens *after* database metrics land in ADX.
+
+Dumping `sys.dm_db_wait_stats`, `sys.dm_exec_requests`, and Query Store intervals into Kusto tables is necessary, and you want that raw history when digging into a weird edge case. But raw DMV rows make terrible 2 AM alerts. Getting paged with *"CPU > 90% on `orders-prod`"* or *"LCK_M_X wait time spiked"* still leaves the on-call engineer writing five KQL joins half-asleep to answer basic questions:
+
+- Did a query switch execution plans after statistics updated at 01:55 UTC, or did call volume triple?
+- Is checkout blocked behind an `idle in transaction` session that forgot to commit before making an HTTP call?
+- Is a query spilling 4 GB to `tempdb` because a table-valued parameter misestimated row counts?
+- Did nothing fire because the database is actually fine, or because the collector lost `VIEW DATABASE PERFORMANCE STATE` after a permission deployment?
+
+## Streaming both raw telemetry and root-cause answers to ADX
+
+Culprit's open-source collector (`culprit collect`) was built to feed **your existing ADX cluster** (or **ClickHouse**, if you run outside Azure) without locking you into a hosted SaaS or Fabric workspace.
+
+Architecturally, it stays boring on purpose:
+
+- **Runs inside your database network.** You deploy `culprit` as a small container in the VNet/VPC that already reaches your databases. Source credentials, Azure Blob (or S3) recovery storage, and ADX ingestion use separate named profiles; Entra ID / Managed Identity works out of the box, and database credentials never leave your network.
+- **Hard collection budgets.** Every native read against DMVs, Query Store, `pg_stat_statements`, or `performance_schema` runs read-only under strict row, byte, and timeout caps. If a database is already struggling, the collector backs off and records an explicit coverage gap instead of piling onto the outage.
+- **Same schema across engines.** One collector handles Azure SQL, SQL Server, PostgreSQL, TimescaleDB, YugabyteDB, MySQL, and MariaDB.
+- **Local pure-Rust synthesis before ingestion.** Once a capture batch is sealed locally (and backed by immutable objects in Azure Blob or S3), the collector runs Culprit's analysis engine in-process with zero extra database queries.
+
+Alongside raw resource, wait, session, and query-runtime tables, ADX receives three diagnostic tables:
+
+| ADX / ClickHouse Table | What lands in it |
+| :--- | :--- |
+| `CulpritIncidentsV1` | Active and resolved incident episodes, victim summary, culprit query SQL, blocking or resource mechanism, suggested fix, and how to verify it |
+| `CulpritFindingsV1` | Ranked query, index, schema, and health findings from captured workload windows with explicit check coverage |
+| `CulpritChangesV1` | Plan regressions, new heavy queries, schema/setting shifts, and restarts across intervals |
+
+## What the KQL looks like in practice
+
+You can query `CulpritIncidentsV1` directly, or generate typed Kusto stored functions bound to your archive namespace (`culprit collect queries --config archive.json --name Prod ...`):
+
+```kql
+// Azure Monitor Scheduled Query Rule or Grafana alert (every 1-5m)
+ProdNewIncidents("Orders production", ago(5m), now(), now())
+```
+
+Or directly against the raw incident table when building custom dashboards:
+
+```kql
+CulpritIncidentsV1
+| where UpdatedAt > ago(5m) and Status == "active" and Severity == "high"
+| project StartedAt, DatabaseName, CulpritKind, Headline, CulpritSql, DeveloperAction
+```
+
+Just as important, we keep **database incidents** separate from **telemetry health**. An empty result from an incident query should never be treated as proof that a database is healthy if the collector was fenced or missing permissions:
+
+```kql
+// Separate pipeline / coverage health alert
+ProdStatus("Orders production", now(), 30m)
+| where State != "observed" or not(InputReadComplete) or array_length(ContextIssues) > 0
+```
+
+## Investigating an incident without touching production
+
+When an alert fires at night, neither you nor an AI coding agent needs to open a live connection to the production database to inspect what happened. Using read-only ADX + Blob credentials, you can pull the exact 10-minute window from the terminal:
+
+```sh
+culprit resources --config evidence.json --json
+culprit incident "Orders production" --around 2026-11-21T02:15:00Z --config evidence.json
+```
+
+Or open **Telemetry archives** in the [Culprit SQL Studio](https://culpritsql.com) desktop app, pick the database and timestamp, and step through the captured queries, plans, blocking tree, and coverage notes offline.
+
+If you are planning your migration off Azure SQL Database Watcher before the April 30, 2027 cutoff and want to keep your ADX / KQL investment intact, check out the [Collector & ADX architecture docs](https://github.com/culpritsql/culprit-sql-studio/blob/main/docs/collector.md) and [Warehouse query helpers](https://github.com/culpritsql/culprit-sql-studio/blob/main/docs/warehouse-queries.md) in the repo.

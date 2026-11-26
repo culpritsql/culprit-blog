@@ -1,0 +1,105 @@
+---
+title: "Why Database Monitors Cry Wolf: 7 Evidence Rules We Enforce in Rust"
+seoTitle: "Why Database Monitors Cry Wolf: 7 Evidence Rules We Enforce"
+description: "Dropping an index that a read replica relies on or indexing a 40%-selective column makes production slower. Seven anti-false-flag rules we hardcoded into Culprit's Rust check pipeline so alerts stay trustworthy."
+seoDescription: "Dropping an index used by a read replica or indexing a 40%-selective scan hurts production. Inside the 7 anti-false-flag rules in Culprit's Rust engine."
+pubDate: 2026-11-24
+author: "Cristian Pufu"
+readingMinutes: 8
+tags: ["SQL Server", "PostgreSQL", "Indexes", "Execution Plans", "Architecture"]
+keywords: ["sql server missing index false positive", "unused index read replica", "database performance diagnostics rules", "implicit conversion vs explicit convert sqlplan", "index selectivity threshold 10 percent", "pg_stat_statements counter reset"]
+relatedSlug: "microsoft-database-hub-vs-culprit-adx"
+---
+
+import Callout from "../../components/Callout.astro";
+import KeyTakeaways from "../../components/KeyTakeaways.astro";
+import MssqlImplicitConversionEmbed from "../../components/MssqlImplicitConversionEmbed.astro";
+import StatStrip from "../../components/StatStrip.astro";
+
+<KeyTakeaways
+  label="TL;DR"
+  items={[
+    "<strong>Naive DMV scripts destroy trust fast:</strong> once a tool tells a developer to drop an 'unused' index that takes down a reporting replica, the team ignores every future alert.",
+    "<strong>Every check in Culprit is a pure Rust function (<code>decide</code> -> <code>render</code>)</strong> bound by shared evidence invariants across SQL Server, PostgreSQL, MySQL, MariaDB, YugabyteDB, and SQLite.",
+    "<strong>If a prerequisite is missing or counters just reset, Culprit locks the check with the exact reason</strong> instead of guessing or claiming zero issues."
+  ]}
+/>
+
+Almost every DBA has a folder of DMV scripts, and almost every application developer has been burned by taking one of those scripts too literally.
+
+You run a popular "Top Missing Indexes" query on SQL Server, add the three indexes with the highest `avg_user_impact`, and watch write latency double while select queries barely move. Or a dashboard flags an index with `user_seeks = 0` on the primary, someone drops it on Friday afternoon, and Monday's billing batch grinds to a halt on the readable secondary.
+
+When we started building [Culprit SQL Studio](https://culpritsql.com) and its [ADX / ClickHouse warehouse synthesizer](/blog/microsoft-database-hub-vs-culprit-adx/), our top architectural goal was simple: **a finding must never be a false flag.** If the evidence cannot prove a claim, stay quiet and explain what measurement is missing.
+
+Here are the seven rules enforced in `crates/culprit-checks` before any finding is allowed to render.
+
+## 1. Never call an index "unused" without every read replica and 7 days of counters
+
+`sys.dm_db_index_usage_stats` and `pg_stat_user_indexes` reset to zero whenever the engine restarts, fails over, or Detach/Attaches a database. Even worse, index usage counters are **local to the instance that executed the query**.
+
+An index created specifically for BI reporting or customer CSV exports on an Availability Group readable secondary (or RDS read replica) will legitimately show `0` seeks and `0` scans on the primary forever, while still paying write maintenance on every `INSERT` and `UPDATE`.
+
+Culprit refuses to emit `unused-index` unless two conditions hold simultaneously:
+- Counter uptime spans **at least 7 full days** without an intervening reset.
+- Either the database is a standalone single-node topology, or index usage has been attested across `AllReadMembers` (primary + all read replicas). Otherwise, the check locks and states that replica usage is unverified.
+
+## 2. Never recommend an index that keeps more than 10% of the table
+
+Database engines love asking for indexes they should not have. SQL Server's `<MissingIndexes>` XML group only sees the single query being compiled; it cheerfully asks for a wide nonclustered index on `WHERE archived = 0` when 92% of the table has `archived = 0`.
+
+In Culprit, every index recommendation must pass `INDEX_KEEPS_AT_MOST` (**10% selectivity**), verified against row counts and column statistics (`sys.dm_db_stats_histogram` / `pg_stats`). If a predicate keeps 40% of a table, adding a B-tree index wastes disk, slows writes, and usually gets ignored by the optimizer anyway.
+
+<StatStrip
+  stats={[
+    { value: ">= 7 days", label: "Minimum counter uptime + replica scope required before flagging unused indexes", tone: "amber" },
+    { value: "<= 10% rows", label: "Selectivity ceiling (INDEX_KEEPS_AT_MOST) required for missing-index advice", tone: "green" },
+    { value: ">= 20 hours", label: "Observation span required before phrasing any rate as 'per day'", tone: "default" }
+  ]}
+/>
+
+## 3. Separate column-side `CONVERT_IMPLICIT` from harmless parameter casts
+
+Many plan analyzers grep `.sqlplan` XML for the substring `CONVERT_IMPLICIT` and throw a red warning every time it appears. That produces constant false alarms.
+
+If a column is `bigint` and your ORM binds `@p0` as `int`, SQL Server widens `@p0` **once** before seeking the index (`CONVERT_IMPLICIT(bigint, [@p0], 0)`). That seek is 4 logical reads and completely SARGable.
+
+The real killer is **column-side conversion** (`converts_column`): when a `varchar(64)` column is compared against an `nvarchar(64)` parameter (`N'ch_3Q91...'`). Because `nvarchar` has higher data-type precedence than `varchar`, SQL Server must run `CONVERT_IMPLICIT(nvarchar(64), [external_ref], 0)` on **every row in the index**, turning a 4-page seek into a 19,420-page scan:
+
+<MssqlImplicitConversionEmbed />
+
+Culprit parses the scalar expression AST inside `<SeekPredicates>` and `<Predicate>` and only flags `implicit-conversion` when the table column itself is wrapped in the cast.
+
+## 4. Never extrapolate 5 minutes of traffic into "per day", and never turn `None` into `0`
+
+If you attach to a database whose counters reset twenty minutes ago during a deploy, multiplying 20 minutes of page splits by `72` and telling the user *"430,000 splits/day"* is fiction.
+
+All rate math in Culprit flows through one shared helper (`support::rate_per_day` and `counter_rate_per_day`):
+- Under **1 hour** of counter history, no rate is computed at all.
+- Between **1 hour and 20 hours**, rates are expressed strictly over the observed window, never extrapolated to *"a day"*.
+- On engines with cumulative totals and no native window (like `pg_stat_statements`), rates are computed across **deltas between Culprit's own verified scans** (`Workload::over_scans`), rejecting any pair where `stats_reset` or server incarnation changed.
+- And across every provider struct, an unmeasured metric is `Option::None`, **never `0`**.
+
+## 5. Trust the engine's runtime verdict over guessing from plan shape
+
+Static plan linters often flag every `Seq Scan` or `Hash Match` as bad. On a 400-row lookup table (or a reporting query joining 80% of two tables), a sequential scan + hash join is the fastest plan the hardware can execute.
+
+Whenever actual runtime counters or Query Store wait evidence exist, Culprit checks what the engine actually suffered: measured `SpillToTempDb` warnings, actual vs estimated row skew causing memory-grant starvation (`RESOURCE_SEMAPHORE`), or measured logical reads per row returned. A small table scan that took `0.3 ms` never pollutes your findings list.
+
+## 6. One cause produces one finding (`refine.rs`)
+
+Without cross-finding refinement, one underlying mistake triggers five overlapping complaints:
+- Query A shows up as `heavy-query`, `key-lookup`, `missing-index`, and `high-io`.
+- One `idle in transaction` session blocks 40 workers, generating 40 separate lock warnings ([which is why standard alert rules page on victims](/blog/sql-blocking-deploy-regression-alerts-slack-teams-pagerduty/)).
+- A migration query that ran **once** six hours ago and finished dominates `mean_exec_time`.
+
+Culprit's pipeline runs `prepare -> detect -> refine -> rank`. The `refine` stage collapses duplicate symptoms onto the single actionable root cause, walks blocking chains to the head blocker, and demotes one-off historical queries so your top finding is something still hurting you right now.
+
+<Callout title="Rule 7: Never emit executable DDL without verified schema prerequisites" tone="green">
+  <p>
+    When Culprit analyzes historical warehouse captures from ADX or ClickHouse without a fresh catalog + edition snapshot, it keeps the plain-language explanation and verification steps while withholding raw <code>CREATE INDEX</code> SQL (recording <code>ExecutableFixPrerequisitesUnknown</code>). Guessing <code>WITH (ONLINE = ON)</code> on SQL Server Standard Edition or omitting partition keys breaks deploys; when you are ready to generate a migration, <a href="/blog/database-mcp-server-autonomous-verified-index-prs/"><code>culprit lint-sql</code></a> validates it against the real schema.
+  </p>
+</Callout>
+
+## Plugging in your own checks
+
+Because every built-in check implements the public `culprit_core::Check` trait over an immutable `Snapshot`, you can embed custom company rules via `Workspace::with_check(Arc::new(MyCheck))` and get the exact same refinement, ranking, redaction, and warehouse synthesis pipeline automatically. See [`docs/ARCHITECTURE.md`](https://github.com/culpritsql/culprit-sql-studio/blob/main/docs/ARCHITECTURE.md) for the full pipeline contract.

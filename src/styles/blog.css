@@ -1374,6 +1374,72 @@ html[data-theme="dark"] .ed-stat-box.amber strong {
   color: var(--text-2);
 }
 
+/* Article FAQ Section */
+.article-faq {
+  margin-top: 42px;
+  padding-top: 28px;
+  border-top: 1px solid var(--line);
+}
+
+.article-faq h2 {
+  margin-top: 0;
+  margin-bottom: 16px;
+}
+
+.faq-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.faq-item {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 14px 18px;
+  transition: border-color 120ms ease;
+}
+
+.faq-item:hover {
+  border-color: var(--line-strong);
+}
+
+.faq-item summary {
+  cursor: pointer;
+  font-weight: 640;
+  font-size: 15.5px;
+  color: var(--text);
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.faq-item summary::-webkit-details-marker {
+  display: none;
+}
+
+.faq-item summary::after {
+  content: "+";
+  font-family: var(--mono);
+  font-size: 17px;
+  font-weight: 500;
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+.faq-item[open] summary::after {
+  content: "-";
+}
+
+.faq-item p {
+  margin: 10px 0 0;
+  font-size: 15px;
+  line-height: 1.62;
+  color: var(--text-2);
+}
+
 /* Footer */
 .footer {
   border-top: 1px solid var(--line);

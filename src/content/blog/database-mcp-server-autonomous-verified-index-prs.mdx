@@ -1,0 +1,108 @@
+---
+title: "Beyond Portal Copilots: Database MCP Agents That Open Verified Index PRs"
+seoTitle: "Beyond Portal Copilots: Database Agents That Open Safe PRs"
+description: "Portal chat copilots summarize slow queries in a browser tab and leave the risky migration work to you. Pairing archived ADX plans, SqlCommenter file:line tags, and culprit lint-sql lets coding agents open lock-safe PRs without touching production."
+seoDescription: "Portal copilots stop at chat summaries. How Culprit's MCP server pairs archived ADX plans, SqlCommenter file:line tags, and lint-sql to open verified PRs."
+pubDate: 2026-11-25
+author: "Cristian Pufu"
+readingMinutes: 7
+tags: ["MCP", "AI Agents", "SQL Server", "PostgreSQL", "Execution Plans"]
+keywords: ["database mcp server", "claude code sql performance", "ai agent database migration linter", "microsoft fabric database agents vs mcp", "sqlcommenter slow query pr", "sarif sql migration check"]
+relatedSlug: "after-azure-data-studio"
+---
+
+import Callout from "../../components/Callout.astro";
+import KeyTakeaways from "../../components/KeyTakeaways.astro";
+import MssqlPlanDiffEmbed from "../../components/MssqlPlanDiffEmbed.astro";
+import StatStrip from "../../components/StatStrip.astro";
+
+<KeyTakeaways
+  label="TL;DR"
+  items={[
+    "<strong>Portal-bound database copilots stop halfway:</strong> they summarize a CPU chart inside a browser tab (while burning Fabric CUs), then leave you to find the ORM call site and hand-check DDL locking rules.",
+    "<strong>Culprit's MCP server gives Claude Code, Cursor, and Codex parsed evidence:</strong> <code>fleet_attention</code>, <code>warehouse_plan_insights</code>, and <code>warehouse_plan_compare</code> run in Rust over ADX/Blob archives with zero live DB access.",
+    "<strong>No unverified AI DDL reaches code review:</strong> <code>culprit lint-sql --fail-on high --format sarif</code> blocks table-locking rewrites, bad FK types, and redundant indexes before a PR can open."
+  ]}
+/>
+
+Every database vendor now pitches an "AI Database Agent" inside their cloud portal. In [Microsoft Database Hub](/blog/microsoft-database-hub-vs-culprit-adx/), Copilot sits next to your fleet metrics, consumes Fabric Capacity Units per prompt, and summarizes which query ID used the most CPU.
+
+Having used both portal chat boxes and repo-level coding agents ([as I shared in my post-Azure Data Studio setup](/blog/after-azure-data-studio/)), portal copilots have two structural blind spots:
+
+1. **They cannot see your application code.** Knowing `query_id = 4192` scanned `shop.orders` does not tell a portal chatbot which TypeScript repository, Prisma call, or migration directory owns that table.
+2. **LLMs are dangerous when guessing SQL migrations.** Left unchecked, an LLM will happily suggest `CREATE INDEX ix_orders_status ON shop.orders(status)` without `CONCURRENTLY` on PostgreSQL (locking writes on a 40M-row table) or create a fourth overlapping index on a column that already has 85% write overhead.
+
+Fixing slow queries safely requires **deterministic Rust analysis on both ends** - parsing the archived execution plan before the LLM thinks, and linting the proposed SQL migration against real table/index metadata before a PR opens.
+
+## Three warehouse MCP tools built for 64 KiB context budgets
+
+Raw `.sqlplan` XML files routinely exceed 2 MB. Dumping raw XML into an agent's context window blows token budgets and causes hallucinations on nested `<RelOp>` nodes.
+
+When you start `culprit mcp` in `EvidenceOnly` mode delegated to your read-only ADX or ClickHouse archive, the agent gets three high-signal warehouse tools alongside `resources`, `window`, and `incident`:
+
+| MCP Tool | What Rust executes before returning JSON (`<= 64 KiB`) |
+| :--- | :--- |
+| `fleet_attention` | Calls `WarehouseFleetReader` to rank up to 25 databases needing attention (active incidents, new regressions, high findings, collector gaps) in **one** tool call. |
+| `warehouse_plan_insights` | Fetches the exact `.sqlplan` or `EXPLAIN (FORMAT JSON)` blob from Azure Storage / S3, verifies its SHA-256 digest, runs `culprit_plans::parse_plan` + 32 plan-insight rules, and returns the compact operator tree + ranked fixes. |
+| `warehouse_plan_compare` | Fetches two archived plan artifacts (e.g. baseline plan vs regressed plan), runs `culprit_plans::compare`, and returns operator diffs, row-estimate skew, and compiled parameter mismatches. |
+
+<Callout title="Prompt-injection defense on database text" tone="amber">
+  <p>
+    Production query text, table comments, and deadlocked session buffers can contain untrusted user strings. Every Culprit MCP response strips literals where configured and wraps database-sourced strings with explicit data-only framing so an injected SQL comment is never treated as agent instructions.
+  </p>
+</Callout>
+
+## From archived Key Lookup to verified covering index
+
+Here is what that workflow looks like on a real checkout slowdown. `fleet_attention` flags `shop-prod` with a high-impact finding (`key-lookup` accounting for 34% of database time). The captured SqlCommenter tag (`/* controller='orders#recent',file='src/orders/repo.ts:84' */`) points straight to the repository file.
+
+Calling `warehouse_plan_insights` parses the archived `.sqlplan` and surfaces the `18,400` Key Lookups on `pk_orders`. Once the covering `INCLUDE (customer_id, total_cents, shipping_notes)` index is tested, the plan drops from `56,120` logical reads (`184 ms`) to `157` logical reads (`3 ms`):
+
+<MssqlPlanDiffEmbed />
+
+## The mandatory gate: `culprit lint-sql` in CI
+
+Giving an agent production evidence is step one. Refusing to trust its generated DDL blindly is step two.
+
+Before opening a pull request (and again on every PR in GitHub Actions), `culprit agent triage-warehouse` and `culprit lint-sql` check the proposed migration file offline against a saved schema/size snapshot:
+
+```sh
+# 1. Generate a redacted Markdown triage brief + validate proposed migration
+culprit agent triage-warehouse \
+  --warehouse-evidence evidence-readonly.json \
+  --resource "shop-prod" \
+  --window 24h \
+  --report shop-schema-snapshot.json \
+  --proposed-sql migrations/20261126_cover_orders_status.sql \
+  --fail-on high \
+  --format markdown > pr-brief.md
+
+# 2. Emit GitHub Code Scanning SARIF for inline PR annotations
+culprit lint-sql shop-schema-snapshot.json \
+  --file migrations/20261126_cover_orders_status.sql \
+  --fail-on high \
+  --format sarif > culprit-lint.sarif
+```
+
+<StatStrip
+  stats={[
+    { value: "0 live queries", label: "Both warehouse triage and lint-sql run 100% offline against archived metadata", tone: "green" },
+    { value: "SARIF output", label: "Blocks offline index builds, NOT NULL table rewrites, and FK type mismatches", tone: "amber" },
+    { value: "Redacted PRs", label: "Generated briefs include exact culprit verify commands without leaking SQL literals", tone: "default" }
+  ]}
+/>
+
+We also ship a composite GitHub Action (`.github/actions/culprit-warehouse-triage`) you can trigger on a schedule or from a [`culprit-notify` webhook](/blog/sql-blocking-deploy-regression-alerts-slack-teams-pagerduty/):
+
+```yaml
+- uses: culpritsql/culprit-sql-studio/.github/actions/culprit-warehouse-triage@main
+  with:
+    warehouse-config: ./ops/evidence-readonly.json
+    resource: shop-prod
+    window: 24h
+    snapshot-report: ./ops/shop-schema.json
+    proposed-sql: ./migrations/20261126_cover_orders_status.sql
+    fail-on: high
+```
+
+If the agent forgets `WITH (ONLINE = ON)` on SQL Server Enterprise or `CREATE INDEX CONCURRENTLY` on PostgreSQL, `lint-sql` exits non-zero and the bad migration never reaches a human reviewer's inbox. And because Culprit enforces [strict selectivity and read-replica evidence rules](/blog/why-database-monitors-cry-wolf-seven-evidence-rules/), it will not suggest dropping an index that a read replica still relies on.

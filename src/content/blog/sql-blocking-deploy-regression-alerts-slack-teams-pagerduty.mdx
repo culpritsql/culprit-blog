@@ -1,0 +1,86 @@
+---
+title: "Alert on SQL Culprits and Deploy Regressions, Not 40 Blocked Victims"
+seoTitle: "Alert on SQL Culprits & Deploy Regressions, Not Victims"
+description: "Why standard wait and session alerts page on-call for victims instead of root causes, and how Culprit's pluggable notifier sends one auto-resolving PagerDuty, Slack, or Teams alert with the culprit SQL."
+seoDescription: "Stop paging on-call for 40 blocked victim sessions. How Culprit's pluggable notifier sends 1 auto-resolving PagerDuty/Slack/Teams alert with the culprit SQL."
+pubDate: 2026-11-25
+author: "Cristian Pufu"
+readingMinutes: 7
+tags: ["SQL Server", "PostgreSQL", "Alerting", "ADX", "Execution Plans"]
+keywords: ["sql plan regression alert", "sql server blocking chain alert", "pagerduty auto resolve database incident", "query store plan switch slack alert", "sql deadlock alert microsoft teams", "alert on blocking culprit not victim"]
+relatedSlug: "why-database-monitors-cry-wolf-seven-evidence-rules"
+---
+
+import Callout from "../../components/Callout.astro";
+import KeyTakeaways from "../../components/KeyTakeaways.astro";
+import MssqlDeadlockEmbed from "../../components/MssqlDeadlockEmbed.astro";
+import StatStrip from "../../components/StatStrip.astro";
+
+<KeyTakeaways
+  label="TL;DR"
+  items={[
+    "<strong>Threshold alerts page on symptoms:</strong> one idle open transaction blocks 40 checkout workers, firing 40 separate lock-timeout or latency alerts that all name innocent victim queries.",
+    "<strong>Culprit deduplicates on causal episodes:</strong> <code>culprit-notify</code> evaluates <code>CulpritIncidentsV1</code>, <code>NewHighFindingsDuring</code>, and <code>NewRegressionsDuring</code>, paging once with the head blocker or regressed plan.",
+    "<strong>Five zero-SDK channel sinks (MIT):</strong> Slack Block Kit, Microsoft Teams Adaptive Cards, PagerDuty Events v2 (with automatic resolution), HMAC-SHA256 webhooks, and GitHub Issues."
+  ]}
+/>
+
+If you have ever been on database on-call, you know the 3 AM alert storm: PagerDuty fires for API checkout latency, then fires for 38 blocked sessions on `orders-prod`, then fires for connection pool exhaustion. Every single alert names `INSERT INTO dbo.order_items`, which usually runs in `1.2 ms`.
+
+`INSERT INTO dbo.order_items` is innocent. It is sitting at the back of a lock queue behind SPID 61, where a background job ran `UPDATE dbo.orders` inside `BEGIN TRAN`, hit a slow webhook retry in Python, and left the transaction sitting `idle in transaction` for four minutes.
+
+Paging an engineer with 40 victim queries wastes the first fifteen minutes of an outage just walking `blocking_session_id` pointers by hand. And as we saw when comparing [Microsoft Database Hub vs. Culprit + ADX](/blog/microsoft-database-hub-vs-culprit-adx/), gating basic alert rules behind paid Fabric Data Activator CUs adds insult to injury.
+
+## Collapse 40 victims into 1 culprit before the alert fires
+
+In Culprit's collector pipeline, blocking chains, metadata-lock sandwiches (`LCK_M_SCH_M` queued behind a long reader while blocking every new `LCK_M_SCH_S` caller), deadlocks, memory-grant starvation, and plan flips are reduced to single root-cause episodes in `CulpritIncidentsV1` and `CulpritChangesV1`.
+
+Take deadlocks. Instead of alerting *"Deadlock count > 0"* and leaving you to hunt down `.xel` files or ring buffers, the collector parses the deadlock XML (or PostgreSQL log / MySQL `INNODB STATUS`), redacts SQL literals, and records both the killed victim and the surviving lock holder:
+
+<MssqlDeadlockEmbed />
+
+Hover either session node above: the incident record already knows that `checkout-worker` (SPID 74) and `fulfillment-sync` (SPID 112) acquired `PK_orders` and `PK_inventory` in opposite order, which statement lost, and how to reorder the transaction.
+
+## Three warehouse alert streams (plus collector health)
+
+When you run `culprit collect queries --config archive.json --name Prod`, Culprit generates four distinct query helpers for ADX or ClickHouse so different classes of problems route cleanly:
+
+| Generated Helper | What triggers it | Typical routing |
+| :--- | :--- | :--- |
+| `ProdRecordedIncidentAlertsDuring` | Active/resolved episodes in `CulpritIncidentsV1` (blocking chains, deadlocks, OOM, worker/grant starvation) | PagerDuty + `#db-incidents` Slack |
+| `ProdNewRegressionsDuring` | `CulpritChangesV1` queries that got slower or switched plans past impact threshold (enriched with `culprit mark` deploy timestamps) | `#eng-releases` Slack / Teams |
+| `ProdNewHighFindingsDuring` | Newly observed `high`-severity actionable findings in `CulpritFindingsV1` (e.g. `log-reuse-blocked`, missing critical index) | GitHub Issues / `#db-tuning` |
+| `ProdStatus` | Stale collector heartbeats, revoked `VIEW DATABASE PERFORMANCE STATE`, or incomplete reads | Platform / infra ops channel |
+
+<Callout title="Proximity to a deploy mark is context, never fake proof" tone="amber">
+  <p>
+    Recording a deployment with <code>culprit mark shop "deploy v2026.11.25"</code> attaches the deploy timestamp to nearby regressions in <code>NewRegressionsDuring</code> so release owners spot a 4.1x plan flip immediately. The message states timing proximity explicitly rather than claiming the deploy caused a statistics refresh it did not touch.
+  </p>
+</Callout>
+
+## Pluggable `culprit-notify` without bloated SDKs or duplicate pages
+
+To deliver those alerts without Fabric Activator or Grafana Enterprise, we built `culprit-notify` around a pure state machine (`AlertEvaluator`) and five tiny channel crates (`slack`, `teams`, `pagerduty`, `webhook`, `github-issues`).
+
+<StatStrip
+  stats={[
+    { value: "1 dedup key", label: "Keyed on (TargetId, OriginalScopeId, OriginalSource, EpisodeId, ControllerVersion)", tone: "green" },
+    { value: "Auto-resolve", label: "IncidentResolved events close the matching PagerDuty incident automatically", tone: "amber" },
+    { value: "Zero vendor SDKs", label: "Pure JSON formatting over one bounded HTTPS transport with secret zeroization", tone: "default" }
+  ]}
+/>
+
+Why does that five-part deduplication key matter?
+
+In real collectors, an active blocking episode emits new revisions as wait time grows, or you might upgrade Culprit's `rules_version` and backfill historical warehouse captures. Because `AlertEvaluator` tracks `(TargetId, OriginalScopeId, OriginalSource, EpisodeId, ControllerVersion)` anchored to `FirstRecordedObservation` (stored atomically on disk or via conditional ETag in Blob/S3), **a long-running incident never re-pages on revision updates, backfills older than your novelty window stay silent, and PagerDuty auto-resolves the exact `dedup_key` the moment the blocker clears.**
+
+Validate your routing config offline (verifying HTTPS origins and secret references without opening sockets), then evaluate batches on a cron or Kubernetes job:
+
+```sh
+culprit collect notify validate --config /etc/culprit/notify.json
+culprit collect notify evaluate --config /etc/culprit/notify.json --input alerts-batch.json
+```
+
+If your org uses an internal incident bus, Opsgenie, or Jira, `culprit-notify-webhook` signs every JSON payload with `X-Culprit-Signature-256` (HMAC-SHA256), or you can register a custom Rust `NotificationSink` in twenty lines via `NotifierBuilder::with_sink`.
+
+Include a deep link to [`culprit-archive-web`](/blog/database-fleet-dashboard-adx-without-grafana-enterprise/) in the Slack/Teams template, or wire the webhook into [`culprit agent triage-warehouse`](/blog/database-mcp-server-autonomous-verified-index-prs/) so regressions automatically draft a `lint-sql`-verified fix PR.

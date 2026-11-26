@@ -10,14 +10,21 @@ export async function getStaticPaths() {
     params: { slug: post.id },
     props: {
       post,
-      otherPost: posts.find((_p, i) => i !== idx) ?? null,
+      otherPost:
+        posts.find((p) => p.id === post.data.relatedSlug) ??
+        posts[(idx + 1) % posts.length] ??
+        null,
     },
   }));
 }
 
 const { post, otherPost } = Astro.props;
 const { Content, headings } = await render(post);
-const tocHeadings = headings.filter((h) => h.depth === 2 || h.depth === 3);
+const faqItems = post.data.faq ?? [];
+const tocHeadings = [
+  ...headings.filter((h) => h.depth === 2 || h.depth === 3),
+  ...(faqItems.length > 0 ? [{ depth: 2, slug: "faq", text: "Frequently asked questions" }] : []),
+];
 
 const isoDate = post.data.pubDate.toISOString().slice(0, 10);
 const publishedIso = post.data.pubDate.toISOString();
@@ -28,60 +35,101 @@ const humanDate = post.data.pubDate.toLocaleDateString("en-US", {
   day: "numeric",
   timeZone: "UTC",
 });
+const humanUpdatedDate = post.data.updatedDate
+  ? post.data.updatedDate.toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      timeZone: "UTC",
+    })
+  : null;
 
 const postUrl = `https://culpritsql.com/blog/${post.id}/`;
 const ogImagePath = `/blog/${post.id}/og.png`;
 const ogImageUrl = `https://culpritsql.com${ogImagePath}`;
 
+const graphNodes: Record<string, unknown>[] = [
+  {
+    "@type": "BlogPosting",
+    "@id": `${postUrl}#article`,
+    headline: post.data.title,
+    description: post.data.seoDescription,
+    image: {
+      "@type": "ImageObject",
+      url: ogImageUrl,
+      width: 1200,
+      height: 630,
+    },
+    datePublished: publishedIso,
+    dateModified: modifiedIso,
+    inLanguage: "en-US",
+    isAccessibleForFree: true,
+    articleSection: "Database Performance",
+    keywords: post.data.keywords.join(", "),
+    timeRequired: `PT${post.data.readingMinutes}M`,
+    author: {
+      "@type": "Person",
+      name: post.data.author,
+      url: "https://github.com/cristipufu",
+    },
+    publisher: {
+      "@type": "Organization",
+      name: "Culprit SQL",
+      url: "https://culpritsql.com/",
+      logo: {
+        "@type": "ImageObject",
+        url: "https://culpritsql.com/apple-touch-icon.png",
+      },
+    },
+    mainEntityOfPage: {
+      "@type": "WebPage",
+      "@id": postUrl,
+    },
+  },
+  {
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Culprit SQL Studio", item: "https://culpritsql.com/" },
+      { "@type": "ListItem", position: 2, name: "Blog", item: "https://culpritsql.com/blog/" },
+      { "@type": "ListItem", position: 3, name: post.data.title, item: postUrl },
+    ],
+  },
+];
+
+if (faqItems.length > 0) {
+  graphNodes.push({
+    "@type": "FAQPage",
+    "@id": `${postUrl}#faq`,
+    mainEntity: faqItems.map((item) => ({
+      "@type": "Question",
+      name: item.question,
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: item.answer,
+      },
+    })),
+  });
+}
+
+if (post.data.howTo) {
+  graphNodes.push({
+    "@type": "HowTo",
+    "@id": `${postUrl}#howto`,
+    name: post.data.howTo.name,
+    description: post.data.howTo.description,
+    ...(post.data.howTo.totalTime ? { totalTime: post.data.howTo.totalTime } : {}),
+    step: post.data.howTo.steps.map((step, index) => ({
+      "@type": "HowToStep",
+      position: index + 1,
+      name: step.name,
+      text: step.text,
+    })),
+  });
+}
+
 const jsonLd = {
   "@context": "https://schema.org",
-  "@graph": [
-    {
-      "@type": "BlogPosting",
-      "@id": `${postUrl}#article`,
-      headline: post.data.title,
-      description: post.data.seoDescription,
-      image: {
-        "@type": "ImageObject",
-        url: ogImageUrl,
-        width: 1200,
-        height: 630,
-      },
-      datePublished: publishedIso,
-      dateModified: modifiedIso,
-      inLanguage: "en-US",
-      isAccessibleForFree: true,
-      articleSection: "Database Performance",
-      keywords: post.data.keywords.join(", "),
-      timeRequired: `PT${post.data.readingMinutes}M`,
-      author: {
-        "@type": "Person",
-        name: post.data.author,
-        url: "https://github.com/cristipufu",
-      },
-      publisher: {
-        "@type": "Organization",
-        name: "Culprit SQL",
-        url: "https://culpritsql.com/",
-        logo: {
-          "@type": "ImageObject",
-          url: "https://culpritsql.com/apple-touch-icon.png",
-        },
-      },
-      mainEntityOfPage: {
-        "@type": "WebPage",
-        "@id": postUrl,
-      },
-    },
-    {
-      "@type": "BreadcrumbList",
-      itemListElement: [
-        { "@type": "ListItem", position: 1, name: "Culprit SQL Studio", item: "https://culpritsql.com/" },
-        { "@type": "ListItem", position: 2, name: "Blog", item: "https://culpritsql.com/blog/" },
-        { "@type": "ListItem", position: 3, name: post.data.title, item: postUrl },
-      ],
-    },
-  ],
+  "@graph": graphNodes,
 };
 ---
 
@@ -124,6 +172,12 @@ const jsonLd = {
               <strong>{post.data.author}</strong>
               <div class="byline-sub">
                 <time datetime={isoDate}>{humanDate}</time>
+                {humanUpdatedDate && (
+                  <>
+                    <span>·</span>
+                    <span>Updated {humanUpdatedDate}</span>
+                  </>
+                )}
                 <span>·</span>
                 <span>{post.data.readingMinutes} min read</span>
               </div>
@@ -152,6 +206,22 @@ const jsonLd = {
       <div class="article-main">
         <div class="article-prose">
           <Content />
+
+          {
+            faqItems.length > 0 && (
+              <section class="article-faq" aria-labelledby="faq">
+                <h2 id="faq">Frequently asked questions</h2>
+                <div class="faq-list">
+                  {faqItems.map((item) => (
+                    <details class="faq-item">
+                      <summary>{item.question}</summary>
+                      <p>{item.answer}</p>
+                    </details>
+                  ))}
+                </div>
+              </section>
+            )
+          }
         </div>
 
         <aside class="article-foot-box" aria-label="Try Culprit SQL">

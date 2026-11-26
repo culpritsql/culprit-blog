@@ -11,7 +11,7 @@ export async function GET(context: APIContext) {
     title: "Culprit SQL Blog",
     description:
       "Engineering notes on SQL execution plans, deadlocks, query regressions, and production database telemetry.",
-    site: context.site ?? "https://culpritsql.com",
+    site: new URL("/blog/", context.site ?? "https://culpritsql.com"),
     items: posts.map((post) => ({
       title: post.data.title,
       pubDate: post.data.pubDate,

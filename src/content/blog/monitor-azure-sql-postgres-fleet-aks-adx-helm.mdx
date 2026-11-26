@@ -1,0 +1,136 @@
+---
+title: "Monitor 100+ Azure SQL and PostgreSQL Databases on AKS with Helm and ADX"
+seoTitle: "Monitor 100+ SQL & Postgres DBs with AKS, Helm & ADX"
+description: "A copy-paste production guide: auto-discover Azure SQL and Amazon RDS databases, group shared Elastic Pools onto safe shards, and deploy Culprit's collector on AKS with Workload Identity."
+seoDescription: "Step-by-step tutorial: auto-discover Azure SQL and RDS databases, deploy Culprit's collector on AKS with Workload Identity, and stream diagnoses into ADX."
+pubDate: 2026-11-26
+author: "Cristian Pufu"
+readingMinutes: 7
+tags: ["Azure SQL", "PostgreSQL", "ADX", "Kubernetes", "Telemetry"]
+keywords: ["monitor azure sql fleet kubernetes", "aks workload identity azure data explorer", "multi database monitoring helm", "auto discover azure sql rds monitoring", "zero password database telemetry", "culprit collector helm"]
+relatedSlug: "microsoft-database-hub-vs-culprit-adx"
+howTo: {"name": "Deploy Culprit Fleet Monitoring on AKS with Workload Identity and ADX", "description": "Auto-discover Azure SQL and PostgreSQL databases, generate consistent-hashed Helm shard configs, provision ADX tables, and deploy Culprit's read-only collector on AKS.", "totalTime": "PT20M", "steps": [{"name": "Deploy the ADX schema and KQL helper functions", "text": "Run culprit collect schema and culprit collect queries against your Azure Data Explorer database to install canonical telemetry and Gold diagnosis tables."}, {"name": "Auto-discover databases and render Helm shard values", "text": "Run culprit collect sync-inventory --cloud azure --shards 4 --format helm to discover databases and group Elastic Pool or server siblings into shared admission groups."}, {"name": "Grant read-only database permissions to the Managed Identity", "text": "Grant VIEW DATABASE PERFORMANCE STATE on Azure SQL / SQL Server and pg_read_all_stats on PostgreSQL to your AKS Workload Identity principal without storing passwords."}, {"name": "Validate and install the OCI Helm chart", "text": "Validate the generated config offline with culprit collect service validate and install oci://ghcr.io/culpritsql/charts/culprit-collector on AKS."}]}
+---
+
+import Callout from "../../components/Callout.astro";
+import KeyTakeaways from "../../components/KeyTakeaways.astro";
+import StatStrip from "../../components/StatStrip.astro";
+
+<KeyTakeaways
+  label="TL;DR"
+  items={[
+    "<strong>Hand-writing collector configs breaks past a dozen databases.</strong> <code>culprit collect sync-inventory</code> queries Azure Resource Graph or AWS RDS and generates sharded Helm values automatically.",
+    "<strong>Shared physical compute stays protected:</strong> databases in the same Azure SQL Elastic Pool, Managed Instance, or RDS cluster hash into one <code>admission_group</code> on the same pod so concurrent scrapes cannot gang up on shared CPU.",
+    "<strong>Zero database passwords in Kubernetes Secrets:</strong> AKS Workload Identity (or AWS IRSA) handles Entra ID tokens, ADX ingestion, and private Blob plan recovery."
+  ]}
+/>
+
+When teams evaluate [Microsoft Database Hub vs. Culprit + ADX](/blog/microsoft-database-hub-vs-culprit-adx/) after the [Database Watcher retirement announcement](/blog/azure-sql-database-watcher-retirement/), the most common pushback is operational setup. Turning on a portal checkbox across an Azure subscription feels easier than writing `connections.toml` files by hand for 120 databases.
+
+Fair point. Nobody wants to maintain static YAML lists every time a team provisions a new microservice database.
+
+That is why we built `culprit collect sync-inventory` and an official OCI Helm chart (`oci://ghcr.io/culpritsql/charts/culprit-collector`). You can go from an empty AKS namespace to passwordless, sharded collection across Azure SQL, SQL Server, and PostgreSQL in about twenty minutes.
+
+## Step 1: Install the canonical ADX schema
+
+Culprit writes raw telemetry (`Activity`, `WaitCounterSamples`, `OperationalSamples`, `DeadlockEvents`) plus three synthesized Gold tables (`CulpritIncidentsV1`, `CulpritFindingsV1`, `CulpritChangesV1`) into your existing Kusto database. Long `.sqlplan` XML and `.xel` captures stay in a private Azure Blob container referenced by SHA-256 digest.
+
+Generate and apply the ADX schema and typed KQL alert/triage functions once:
+
+```sh
+culprit collect schema --store adx --database culprit > adx-schema.kql
+culprit collect queries --config archive.json --name Prod > adx-helpers.kql
+```
+
+Run both scripts against your ADX database (via Azure CLI, Terraform, or Kusto Web Explorer). Every table uses append-only ingestion with deterministic deduplication headers, so collector restarts never duplicate findings.
+
+## Step 2: Auto-discover your fleet and plan shards
+
+Instead of writing target definitions manually, run `sync-inventory` using your existing `az login` (or `--cloud aws --region us-east-1` for RDS/Aurora):
+
+```sh
+culprit collect sync-inventory \
+  --cloud azure \
+  --shards 4 \
+  --format helm \
+  --target-kind adx \
+  --adx-endpoint https://kusto-prod.eastus.kusto.windows.net \
+  --adx-database culprit \
+  --storage-account stculpritprod01 \
+  --storage-container culprit-native \
+  --tenant-id 00000000-0000-0000-0000-000000000000 \
+  --client-id 11111111-1111-1111-1111-111111111111 \
+  --output-dir ./deploy/fleet
+```
+
+Behind the scenes, the shard planner solves a subtle multi-tenant trap: **Elastic Pool and logical-server noisy neighbors.**
+
+If 30 databases share one 8-vCore Azure SQL Elastic Pool and four separate Kubernetes pods scrape them at the same second, the collector itself creates a connection burst. `sync-inventory` groups every database sharing an Elastic Pool, Managed Instance, Azure SQL logical server, or RDS cluster into a single `admission_group` and hashes that group onto **one** shard (`shard-00` .. `shard-03`). That single pod serializes budgets and pressure checks across the whole pool without needing cross-pod distributed locks.
+
+<StatStrip
+  stats={[
+    { value: "0 secrets", label: "Rendered GitOps files contain named Workload Identity profiles, never inline passwords", tone: "green" },
+    { value: "1 shard / pool", label: "Consistent hashing keeps Elastic Pool and MI siblings under one admission budget", tone: "amber" },
+    { value: "RWO outbox", label: "Local SQLite + fsync outbox survives ADX maintenance without dropping captures", tone: "default" }
+  ]}
+/>
+
+Commit the generated `./deploy/fleet/` directory straight into your GitOps repo. Every run is deterministic: adding one database does not reshuffle unrelated shards.
+
+## Step 3: Grant least-privilege read-only database roles
+
+Bind your AKS User-Assigned Managed Identity (`11111111-...`) as a passwordless reader on the target databases.
+
+On **Azure SQL Database**:
+
+```sql
+CREATE USER [id-culprit-collector-prod] FROM EXTERNAL PROVIDER;
+GRANT VIEW DATABASE PERFORMANCE STATE TO [id-culprit-collector-prod];
+GRANT VIEW DEFINITION TO [id-culprit-collector-prod];
+```
+
+On **Azure Database for PostgreSQL - Flexible Server** (with Entra authentication enabled):
+
+```sql
+-- Create the Entra principal via pgaadauth_create_principal, then grant read-only stats:
+GRANT pg_read_all_stats TO "id-culprit-collector-prod";
+```
+
+If a team forgets `VIEW DEFINITION` on one database, the scan does not crash. Culprit records the missing source capability in `CulpritCollectorConnectionsV1` and keeps collecting waits, sessions, and deadlocks.
+
+<Callout title="Automatic Standard monitoring vs. heavy catalog sweeps" tone="amber">
+  <p>
+    Under <code>MonitoringPolicy::Standard</code>, the collector automatically enrolls source-verified bounded baselines (live activity, blocking, deadlocks, waits, settings, storage/log reuse, cleanup horizon, OOM events, and PostgreSQL statement counters) plus bounded incident follow-ups. Heavy schema/catalog sweeps on 50,000-table databases remain gated until you attach an explicit benchmark receipt.
+  </p>
+</Callout>
+
+## Step 4: Validate offline and install via Helm
+
+Before deploying to AKS, run the offline validator in CI to verify every schedule, shard assignment, and HTTPS endpoint without opening any network connections:
+
+```sh
+for cfg in ./deploy/fleet/shard-*/collector.json; do
+  culprit collect service validate --config "$cfg"
+done
+```
+
+Then deploy each shard with the OCI Helm chart. Each collector pod mounts a small `ReadWriteOncePod` (or `ReadWriteOnce`) persistent volume for `/var/lib/culprit` so its crash-safe outbox can buffer sealed batches if ADX or Blob Storage blips:
+
+```sh
+helm upgrade --install culprit-collector \
+  oci://ghcr.io/culpritsql/charts/culprit-collector \
+  --namespace observability \
+  --create-namespace \
+  -f ./deploy/fleet/values.shards.yaml
+```
+
+## Verifying live ingestion
+
+Within five minutes, check `CulpritCollectorConnectionsV1` and the fleet summary helper in ADX to confirm every target is reporting `observed`:
+
+```kql
+ProdFleetSummary(now(), ago(1h), now())
+| summarize Targets = count(), ActiveIncidents = sum(ActiveIncidents) by FreshnessState, Engine
+```
+
+Once data is landing, point [`culprit-archive-web`](/blog/database-fleet-dashboard-adx-without-grafana-enterprise/) at the read-only ADX endpoint for zero-seat browser triage, and wire [`culprit collect notify`](/blog/sql-blocking-deploy-regression-alerts-slack-teams-pagerduty/) so Slack or PagerDuty pages on culprits rather than raw CPU spikes.

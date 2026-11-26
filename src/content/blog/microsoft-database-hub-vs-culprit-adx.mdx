@@ -1,0 +1,113 @@
+---
+title: "Microsoft Database Hub vs. Culprit + ADX: Depth, Lock-In, and Monthly Cost"
+seoTitle: "Microsoft Database Hub vs. Culprit + ADX: Depth & Cost"
+description: "Database Hub in Microsoft Fabric is now GA as Microsoft's replacement for Azure SQL Database Watcher. I put its Fabric Capacity Unit math, Power BI Pro viewer cliff, and portal charts next to running Culprit on your own ADX or ClickHouse cluster."
+seoDescription: "Compare Microsoft Database Hub in Fabric vs. Culprit + Azure Data Explorer: real monthly costs, execution plan diagnostics, multi-cloud support & alerts."
+pubDate: 2026-11-26
+author: "Cristian Pufu"
+readingMinutes: 8
+tags: ["Azure SQL", "ADX", "SQL Server", "PostgreSQL", "Telemetry"]
+keywords: ["microsoft database hub vs", "database hub microsoft fabric pricing", "microsoft database hub review", "fabric capacity units database monitoring cost", "open source azure sql fleet monitoring", "database hub limitations"]
+relatedSlug: "database-fleet-dashboard-adx-without-grafana-enterprise"
+faq: [{"question": "Is Microsoft Database Hub really free?", "answer": "The basic estate inventory and default portal charts in Database Hub carry no direct Azure SQL surcharge. However, custom KQL retention in Eventhouse, Data Activator alerting, Copilot / Database Agents, and custom Power BI reports consume paid Microsoft Fabric Capacity Units (starting around $263/month PAYG for F2), and sharing custom Fabric dashboards below F64 (~$8,400/month PAYG) requires Power BI Pro licenses per viewer."}, {"question": "What replaces Azure SQL Database Watcher after April 30, 2027?", "answer": "Microsoft's first-party replacement is Database Hub in Microsoft Fabric. Teams who want to keep database telemetry inside their own Azure Data Explorer (ADX) or ClickHouse cluster across Azure SQL, PostgreSQL, MySQL, and self-managed SQL Server can run Culprit's open-source collector instead."}, {"question": "Does Culprit require installing agents on database servers?", "answer": "No. Culprit connects over standard read-only database protocols from a single container or Kubernetes pod in your VNet, enforcing strict query, row, byte, and 1-second statement timeout caps so monitoring never piles onto a production slowdown."}]
+---
+
+import Callout from "../../components/Callout.astro";
+import KeyTakeaways from "../../components/KeyTakeaways.astro";
+import MssqlRegressionDiffEmbed from "../../components/MssqlRegressionDiffEmbed.astro";
+import StatStrip from "../../components/StatStrip.astro";
+
+<KeyTakeaways
+  label="TL;DR"
+  items={[
+    "<strong>Database Hub in Microsoft Fabric is free for basic Azure SQL inventory,</strong> and it is the right default if your organization already pays for an F64 Fabric capacity and only runs Microsoft SQL engines.",
+    "<strong>The bill and friction show up past the overview screen:</strong> alerting (Activator), custom KQL retention, and Database Agents burn Fabric Capacity Units, viewers below F64 need Power BI Pro seats, and PostgreSQL / RDS / MySQL live elsewhere.",
+    "<strong>Culprit + ADX (or ClickHouse) keeps software and viewer seats at $0 (MIT),</strong> covers 7 database engines in one schema, and diffs actual <code>.sqlplan</code> trees and blocking culprits instead of stopping at CPU charts."
+  ]}
+/>
+
+In November 2026, Microsoft took **Database Hub in Microsoft Fabric** to General Availability while setting an April 30, 2027 shutdown date for [Azure SQL Database Watcher](/blog/azure-sql-database-watcher-retirement/). Since then, several teams migrating off Database Watcher have asked me the same practical question: should we move database monitoring into Fabric Database Hub, or stream into our own Azure Data Explorer (ADX) cluster with [Culprit SQL](https://culpritsql.com)?
+
+The honest answer depends on two things: whether your company already pays for large Fabric capacities, and whether you need root-cause execution-plan forensics across more than just Microsoft SQL.
+
+<Callout title="When you should just use Microsoft Database Hub" tone="blue">
+  <p>
+    If your organization already runs an <strong>F64+ Microsoft Fabric capacity</strong>, every production database you own is Azure SQL or Arc-enabled SQL Server, and your team mainly wants a zero-deployment estate inventory with high-level CPU, storage, and security-posture rollups, turn on Database Hub. There is nothing to deploy in AKS, and tenant-wide discovery works out of the box.
+  </p>
+</Callout>
+
+## Where the "$0" Database Hub story changes in production
+
+Database Hub's entry screen has no per-database fee. That is genuinely nice for spotting an idle Elastic Pool or checking fleet versions across subscriptions.
+
+The cost structure shifts as soon as on-call engineers try to wire it into real incident response:
+
+1. **Alerting, retention, and AI burn Fabric Capacity Units (CUs).** Routing telemetry into a custom Fabric Eventhouse for longer KQL retention, setting up Data Activator alert rules, or asking Copilot / Database Agents to investigate an anomaly consumes paid Fabric capacity (F2 starts around `$263/month` pay-as-you-go; production multi-team capacities routinely run F8 to F64 at `$1,050` to `$8,400+/month`).
+2. **The Power BI Pro viewer cliff below F64.** Sharing custom Fabric reports and dashboards across engineering without buying an F64 capacity requires a Power BI Pro license (`~$10 to $14/user/month`) for every developer who clicks an incident link in Slack.
+3. **Single-vendor blind spots.** Almost every backend org I work with runs Azure SQL alongside Azure Database for PostgreSQL, Amazon RDS, MySQL, or YugabyteDB. Putting SQL Server in Fabric while Postgres lives in Grafana or Datadog splits on-call runbooks in half.
+
+## Side-by-side capability and architecture matrix
+
+| Capability | Microsoft Database Hub (Fabric) | Culprit Collector + ADX / ClickHouse |
+| :--- | :--- | :--- |
+| **Supported engines** | Azure SQL DB, MI, SQL on Azure VMs, Arc SQL | Azure SQL, SQL Server, PostgreSQL / RDS, TimescaleDB, YugabyteDB, MySQL, MariaDB (+ SQLite in Studio/CLI) |
+| **Collector deployment** | Microsoft-managed control plane | Stateless read-only container / [AKS Helm chart](/blog/monitor-azure-sql-postgres-fleet-aks-adx-helm/) with Workload Identity |
+| **Analytical store** | Fabric Eventhouse / OneLake | Your own ADX cluster or [self-hosted ClickHouse](/blog/azure-data-explorer-vs-clickhouse-database-telemetry/) |
+| **Viewer & seat licensing** | Power BI Pro below F64 (`~$8,400/mo`) | **$0** ([`culprit-archive-web`](/blog/database-fleet-dashboard-adx-without-grafana-enterprise/) + MIT desktop & CLI) |
+| **Alerting engine** | Fabric Data Activator (consumes CUs) | **$0** built-in [`culprit-notify`](/blog/sql-blocking-deploy-regression-alerts-slack-teams-pagerduty/) (Slack, Teams, PagerDuty, Webhooks, GitHub) |
+| **Execution plan depth** | Aggregated Query Store metrics in portal | Full `.sqlplan` & `EXPLAIN` recovery, 32 plan-insight rules, synchronized Before/After plan diff |
+| **Blocking & deadlocks** | Wait counters & basic session lists | Causal head-blocker chains, `.xel` / ring-buffer deadlock graphs, page-latch & TempDB attribution |
+| **AI & coding agents** | Portal-only Copilot chat (consumes CUs) | Local/CI [MCP server](/blog/database-mcp-server-autonomous-verified-index-prs/) (`warehouse_plan_compare`) + `lint-sql` PR gate |
+
+## Monthly TCO for a 40-database production fleet (25 engineers)
+
+Numbers below use public November 2026 East US pay-as-you-go and 1-year reserved rates so you can check the math against your own Azure invoice:
+
+| Cost Component (40 DBs, 25 viewers) | Fabric Database Hub (F8 PAYG + Pro) | Fabric Database Hub (F64 Reserved) | Culprit + Dev/Test ADX + Blob | Culprit + Prod 2-Node ADX (1-yr RI) |
+| :--- | :--- | :--- | :--- | :--- |
+| **Capacity / Kusto compute** | `~$1,051/mo` (Fabric F8) | `~$5,000/mo` (F64 1-yr RI) | `~$145/mo` (Dev/Test ADX) | `~$580/mo` (2-node Engine RI) |
+| **Raw plan & `.xel` storage** | OneLake CU + storage | OneLake CU + storage | `~$8/mo` (Azure Blob) | `~$12/mo` (Azure Blob) |
+| **Dashboard viewer seats (25 devs)** | `~$350/mo` (Power BI Pro) | `$0` (included at F64+) | `$0` (`culprit-archive-web`) | `$0` (`culprit-archive-web`) |
+| **Alerting & MCP agent software** | Included in Fabric CUs | Included in Fabric CUs | `$0` (MIT open source) | `$0` (MIT open source) |
+| **Estimated monthly total** | **`~$1,400+/mo`** | **`~$5,000+/mo`** | **`~$153/mo`** | **`~$592/mo`** |
+
+<StatStrip
+  stats={[
+    { value: "$0 seats", label: "MIT collector, notifier, MCP server, and read-only web archive viewer", tone: "green" },
+    { value: "7 engines", label: "One canonical incident, finding, and regression schema across clouds", tone: "amber" },
+    { value: "1,000 ms cap", label: "Per-statement timeout and MAXDOP 1 safety guardrails on production", tone: "default" }
+  ]}
+/>
+
+If you run on AWS or bare metal instead of Azure, swapping ADX for [ClickHouse + S3](/blog/azure-data-explorer-vs-clickhouse-database-telemetry/) drops the storage and query bill even further while keeping the exact same collector configuration and UI.
+
+## What a CPU chart misses during a real regression
+
+Cost is half the decision. Diagnostic depth is the other half.
+
+Portal dashboards are good at showing that `billing-prod` spiked from 18% to 85% CPU at 14:10 UTC and that `SOS_SCHEDULER_YIELD` + `TEMPDB` writes jumped. They still leave an engineer staring at query IDs trying to figure out *why* a query that ran in `4 ms` all morning suddenly takes `412 ms`.
+
+When Culprit's collector detects a regression window or memory-grant episode, it seals the native `.sqlplan` XML in private Blob Storage and runs a pure Rust diff before writing to `CulpritChangesV1`. Here is the exact Before/After diff from a multi-tenant invoice lookup after statistics refreshed on a skewed `@tenant_id`:
+
+<MssqlRegressionDiffEmbed />
+
+Click **Regressed plan 69** in the live viewer above: you can see `ParameterCompiledValue="(9001)"` vs `ParameterRuntimeValue="(42)"`, the switch from an ordered `Index Seek` (`28` logical reads) to two `Clustered Index Scans` + `Hash Match` (`48,900` logical reads), and the Level-2 TempDB sort spill warning. You do not need to open SSMS, connect to production, or guess from average duration bars.
+
+## How teams keep zero-trust production safety
+
+A reasonable objection to running your own collector container is: *"How do I know a background collector won't hammer a struggling database?"*
+
+We designed every collector source around [strict evidence and safety rules](/blog/why-database-monitors-cry-wolf-seven-evidence-rules/):
+
+- **Source-verified `BuiltinSafety` envelopes:** Unattended 24/7 recipes run with `OPTION (MAXDOP 1)`, bounded `TOP (@P1)` row caps, byte ceilings, `1,000 ms` statement timeouts, and SHA-256 template verification. Broad physical page-header scans (`sys.dm_db_page_info` across all waiters) or full plan-cache sweeps stay off unless explicitly approved; active page-latch incidents inspect only the single contended page (`max_snapshot_rows = 1`).
+- **Zero-query synthesis:** Diagnosis (`CulpritIncidentsV1`, `CulpritFindingsV1`, `CulpritChangesV1`) runs in Rust over local sealed captures *before* warehouse upload. Synthesizing findings sends **zero** extra SQL queries to your database.
+- **Source-free web & MCP reads:** Both [`culprit-archive-web`](/blog/database-fleet-dashboard-adx-without-grafana-enterprise/) and warehouse [MCP tools](/blog/database-mcp-server-autonomous-verified-index-prs/) compile without database drivers (`dev/check-boundaries.py` enforces this in CI). A browser viewer or coding agent literally cannot open a connection to your production SQL Server.
+
+## Where to go next
+
+If you are planning your move before Database Watcher's April 30, 2027 cutoff, pick the walkthrough that matches your stack:
+
+- **Deploying on Kubernetes:** [Auto-discover 100+ Azure SQL & Postgres databases with AKS, Workload Identity, and Helm](/blog/monitor-azure-sql-postgres-fleet-aks-adx-helm/)
+- **Replacing Grafana Enterprise:** [Zero-seat Fleet Triage dashboards and plan diffs on ADX](/blog/database-fleet-dashboard-adx-without-grafana-enterprise/)
+- **Cutting on-call noise:** [Alerting on head blockers and deploy regressions in Slack, Teams, and PagerDuty](/blog/sql-blocking-deploy-regression-alerts-slack-teams-pagerduty/)
+- **Coding agents & CI:** [Pairing archived ADX plans with `culprit lint-sql` to open verified index PRs](/blog/database-mcp-server-autonomous-verified-index-prs/)

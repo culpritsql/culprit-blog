@@ -1,0 +1,93 @@
+---
+title: "Database Fleet Triage on ADX Without Grafana Enterprise or Fabric F64"
+seoTitle: "Database Fleet Triage on ADX (Without Grafana Enterprise)"
+description: "Grafana's Azure Data Explorer plugin requires an Enterprise license, and Fabric gates free viewers below F64. We built a driver-free web binary that renders fleet triage dashboards and .sqlplan diffs directly over read-only ADX and Blob Storage."
+seoDescription: "Grafana's ADX plugin requires Enterprise licensing, and Fabric gates free viewers at F64. Render zero-seat fleet dashboards and plan diffs on ADX."
+pubDate: 2026-11-25
+author: "Cristian Pufu"
+readingMinutes: 6
+tags: ["ADX", "Azure SQL", "PostgreSQL", "Execution Plans", "Telemetry"]
+keywords: ["azure data explorer dashboard without grafana enterprise", "database fleet triage dashboard", "azure sql elastic pool noisy neighbor", "free adx dashboard alternative", "power bi pro f64 viewer alternative", "self hosted database archive viewer"]
+relatedSlug: "microsoft-database-hub-vs-culprit-adx"
+---
+
+import Callout from "../../components/Callout.astro";
+import KeyTakeaways from "../../components/KeyTakeaways.astro";
+import MssqlRegressionDiffEmbed from "../../components/MssqlRegressionDiffEmbed.astro";
+import StatStrip from "../../components/StatStrip.astro";
+
+<KeyTakeaways
+  label="TL;DR"
+  items={[
+    "<strong>ADX is cheap for telemetry, but dashboards around it often are not:</strong> Grafana's official Azure Data Explorer datasource requires Grafana Enterprise or paid Grafana Cloud, and Fabric requires Power BI Pro per viewer below F64.",
+    "<strong><code>culprit-archive-web</code> serves Culprit's Estate Triage UI and plan differ in a browser for $0,</strong> backed strictly by read-only ADX/ClickHouse and Blob Storage credentials.",
+    "<strong>Compiled without database drivers:</strong> CI enforces that the web binary cannot import TDS, libpq, or MySQL client crates, so exposing dashboards internally never widens database network access."
+  ]}
+/>
+
+Azure Data Explorer (ADX) is one of my favorite bargains in cloud infrastructure for database telemetry. A small cluster ingests millions of wait, session, and query-interval rows without breaking a sweat, and KQL makes ad-hoc slicing fast.
+
+The catch hits when you want 30 backend engineers to view dashboards without writing KQL.
+
+Teams usually walk into one of two licensing walls:
+
+- **The Grafana ADX tax.** Open-source Grafana ships in Kubernetes everywhere, right up until you install the Azure Data Explorer datasource plugin and discover it is gated behind **Grafana Enterprise** or paid Grafana Cloud seats.
+- **The Fabric viewer cliff.** As I broke down in [Microsoft Database Hub vs. Culprit + ADX](/blog/microsoft-database-hub-vs-culprit-adx/), sharing custom Fabric dashboards across an org without an F64 capacity (`~$8,400/month` PAYG) requires a Power BI Pro license for every developer who opens a link.
+
+Even if you pay for either one, neither Grafana nor Power BI knows how to render a 2 MB `.sqlplan` operator tree or diff two execution plans side by side.
+
+## What an estate triage screen actually needs to answer
+
+When someone opens a fleet view during a slowdown, they are not looking for forty sparklines of buffer cache hit ratio. They want four answers in ten seconds:
+
+1. **Which databases have an active incident right now?** (blocking chain, deadlock loop, memory-grant queue, worker starvation, log-rate governance)
+2. **Did a recent deploy or statistics refresh flip an execution plan?** (`CulpritChangesV1` regressions)
+3. **Is an Elastic Pool or Managed Instance suffering from a noisy neighbor?** (shared-compute grouping attested by native metadata)
+4. **Are any collectors stale or missing permissions?** (`collector_failing` / `partial` vs genuinely quiet)
+
+We built `WarehouseFleetReader` over `<Prefix>FleetSummary` in both ADX and [ClickHouse](/blog/azure-data-explorer-vs-clickhouse-database-telemetry/), and surfaced it as the top-level **Estate Triage** grid inside Culprit's `Archives` view. Filter chips (`Needs attention`, `Incidents`, `Regressions`, `High findings`, `Collector health`, `By Elastic Pool / Instance`) and `/` + `j`/`k` keyboard navigation work identically in the desktop app and in the browser.
+
+## Drilling from an Elastic Pool spike into the exact plan flip
+
+Suppose an Elastic Pool starts throttling writes and CPU climbs across six tenant databases. Grouping by `Elastic Pool` immediately shows five databases waiting on `RESOURCE_GOVERNOR` while one database (`billing-prod`) accounts for the new CPU jump after a plan switch.
+
+Clicking that regression in `Archives` pulls the sealed baseline and regressed `.sqlplan` blobs from Azure Storage, verifies their SHA-256 digests against the warehouse manifest, and opens the synchronized plan diff right in the browser:
+
+<MssqlRegressionDiffEmbed />
+
+Instead of pasting KQL query hashes into SSMS on a jumpbox, every engineer on the incident call can click the operator tree and see that `@tenant_id = 9001` poisoned the cached plan with two Clustered Index Scans and a TempDB sort spill.
+
+## Running `culprit-archive-web` behind Entra EasyAuth or OIDC
+
+To share that exact UI across an engineering org with zero per-seat cost, we ship a tiny standalone binary: `culprit-archive-web`.
+
+<StatStrip
+  stats={[
+    { value: "0 DB drivers", label: "dev/check-boundaries.py forbids TDS, Postgres, MySQL, and collector write crates", tone: "green" },
+    { value: "<= 100 rows/page", label: "Bounded warehouse pagination and per-request cancellation on navigation", tone: "amber" },
+    { value: "OIDC header gate", label: "Refuses non-loopback binds unless an auth proxy header is enforced", tone: "default" }
+  ]}
+/>
+
+Run it in Azure Container Apps, App Service (with Entra ID EasyAuth enabled), or Kubernetes behind `oauth2-proxy`:
+
+```sh
+culprit-archive-web \
+  --config /etc/culprit/evidence-readonly.json \
+  --name "Production Fleet" \
+  --bind 0.0.0.0:8080 \
+  --ui-dist /usr/share/culprit/ui \
+  --require-auth-header X-MS-CLIENT-PRINCIPAL-ID
+```
+
+`evidence-readonly.json` holds only read-only ADX viewer and Blob reader profiles (Workload Identity or IAM role). It has **no** `connections.toml` and **no** credentials to any SQL Server, PostgreSQL, or MySQL instance.
+
+<Callout title="Strict read-only compile boundary" tone="green">
+  <p>
+    <code>culprit-archive-web</code> compiles only with the <code>warehouse-adx,evidence-azure,warehouse-clickhouse,evidence-s3</code> read-only feature set. Our CI boundary script (<code>python3 dev/check-boundaries.py</code>) fails the build if a database driver, collector scheduler, or warehouse write adapter ever enters its dependency graph.
+  </p>
+</Callout>
+
+If a user switches time windows mid-query or closes the browser tab, the HTTP handler cancels the underlying Kusto or S3 stream immediately via `CollectionCancellation` so stray tab clicks cannot pile up expensive warehouse scans.
+
+Pair this viewer with [AKS Helm auto-discovery](/blog/monitor-azure-sql-postgres-fleet-aks-adx-helm/) for ingestion and [`culprit-notify`](/blog/sql-blocking-deploy-regression-alerts-slack-teams-pagerduty/) for Slack/PagerDuty links that drop responders straight onto the affected resource window.

@@ -4,10 +4,12 @@ seoTitle: "Azure SQL Database Watcher Retirement: Keep Your ADX Setup"
 description: "Microsoft blocked new Azure SQL Database Watchers on November 9, 2026 and will stop existing ones on April 30, 2027. Here is how to keep database telemetry and root-cause alerts flowing into your own ADX cluster."
 seoDescription: "Azure SQL Database Watcher retires April 30, 2027 without hitting GA. Keep database telemetry and root-cause KQL alerts flowing into your ADX cluster."
 pubDate: 2026-11-22
+updatedDate: 2026-11-26
 author: "Cristian Pufu"
 readingMinutes: 6
 tags: ["Azure SQL", "ADX", "KQL", "Telemetry", "PostgreSQL"]
 keywords: ["Azure SQL Database Watcher retirement", "Database Watcher alternative", "Azure Data Explorer SQL monitoring", "Fabric Database Hub vs ADX", "KQL database alerts"]
+relatedSlug: "microsoft-database-hub-vs-culprit-adx"
 ---
 
 import Callout from "../../components/Callout.astro";
@@ -52,6 +54,12 @@ Microsoft is retiring **Database Watcher for Azure SQL** in preview without taki
 ## Why losing the ADX pipeline stings
 
 Microsoft's migration guide points to **Database Hub in Microsoft Fabric**. If your company already bought Fabric capacities and wants a managed portal covering Azure SQL, SQL Server on VMs, and Azure Arc, that direction makes sense.
+
+<Callout title="Evaluating Microsoft Database Hub?" tone="blue">
+  <p>
+    We published a full architectural and monthly TCO comparison (Fabric F2-F64 Capacity Units and Power BI Pro viewer seats vs. Dev/Prod ADX + Blob): <a href="/blog/microsoft-database-hub-vs-culprit-adx/">Microsoft Database Hub vs. Culprit + ADX: Depth, Lock-In, and Monthly Cost</a>.
+  </p>
+</Callout>
 
 For teams who chose Database Watcher specifically **because it wrote into their own ADX cluster**, moving into Fabric creates three headaches:
 
@@ -125,6 +133,6 @@ culprit resources --config evidence.json --json
 culprit incident "Orders production" --around 2026-11-21T02:15:00Z --config evidence.json
 ```
 
-Or open **Telemetry archives** in the [Culprit SQL Studio](https://culpritsql.com) desktop app to step through the captured queries, execution plans, and blocking chains offline.
+Or open **Telemetry archives** in the [Culprit SQL Studio](https://culpritsql.com) desktop app (or host [`culprit-archive-web`](/blog/database-fleet-dashboard-adx-without-grafana-enterprise/) for zero-seat browser triage) to step through the captured queries, execution plans, and blocking chains offline.
 
-Full setup details live in the [Collector & ADX architecture guide](https://github.com/culpritsql/culprit-sql-studio/blob/main/docs/collector.md) and [Warehouse query helpers](https://github.com/culpritsql/culprit-sql-studio/blob/main/docs/warehouse-queries.md).
+Ready to deploy? Follow the step-by-step [AKS + Workload Identity + Helm fleet guide](/blog/monitor-azure-sql-postgres-fleet-aks-adx-helm/) and wire [auto-resolving Slack, Teams, and PagerDuty culprit alerts](/blog/sql-blocking-deploy-regression-alerts-slack-teams-pagerduty/), or read the [Collector & ADX architecture guide](https://github.com/culpritsql/culprit-sql-studio/blob/main/docs/collector.md) and [Warehouse query helpers](https://github.com/culpritsql/culprit-sql-studio/blob/main/docs/warehouse-queries.md).

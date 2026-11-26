@@ -1,0 +1,21 @@
+---
+import { getMssqlRegressionDiffDemo } from "../lib/demoArtifacts";
+import { PlanDiffIsland } from "./PlanDiffIsland";
+
+const { a, b, diff, nameA, nameB, explainUrl } = await getMssqlRegressionDiffDemo();
+const caption =
+  "Live @culpritsql/plan-viewer diff: after statistics refreshed on @tenant_id = 9001, SQL Server swapped an Index Seek (4 ms, 28 logical reads) for two Clustered Index Scans, a Hash Match, and a Level-2 TempDB sort spill (412 ms, 48,900 logical reads).";
+---
+
+<div class="blog-wide">
+  <PlanDiffIsland
+    client:visible
+    a={a}
+    b={b}
+    diff={diff}
+    nameA={nameA}
+    nameB={nameB}
+    explainUrl={explainUrl}
+    caption={caption}
+  />
+</div>

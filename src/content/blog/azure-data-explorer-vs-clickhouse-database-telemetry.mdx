@@ -1,0 +1,97 @@
+---
+title: "ADX vs. ClickHouse for Database Telemetry: Cost, Schemas, and Tradeoffs"
+seoTitle: "ADX vs. ClickHouse for Database Telemetry: Cost & Schemas"
+description: "We wrote first-class Rust storage adapters for both Azure Data Explorer and ClickHouse against the exact same telemetry contract. Notes on 64-bit counter quirks, schema design, operational overhead, and real monthly bills from 5 to 500 databases."
+seoDescription: "Running Culprit's collector on Azure Data Explorer vs. ClickHouse + S3/Blob: real ingestion tradeoffs, schema design, and monthly bills from 5 to 500 DBs."
+pubDate: 2026-11-24
+author: "Cristian Pufu"
+readingMinutes: 7
+tags: ["ADX", "ClickHouse", "Telemetry", "PostgreSQL", "Azure SQL"]
+keywords: ["azure data explorer vs clickhouse", "clickhouse vs adx cost", "database telemetry storage architecture", "adx dev tier vs clickhouse", "kusto vs clickhouse time series logs", "multi cloud database observability"]
+relatedSlug: "microsoft-database-hub-vs-culprit-adx"
+---
+
+import Callout from "../../components/Callout.astro";
+import KeyTakeaways from "../../components/KeyTakeaways.astro";
+import StatStrip from "../../components/StatStrip.astro";
+
+<KeyTakeaways
+  label="TL;DR"
+  items={[
+    "<strong>Culprit speaks both natively:</strong> <code>culprit-store-adx</code> and <code>culprit-store-clickhouse</code> implement the exact same append-only evidence and Gold diagnosis contracts.",
+    "<strong>Pick Azure Data Explorer (ADX)</strong> if you already live on Azure, use Entra Workload Identity, and want zero-maintenance hot/cold caching with KQL.",
+    "<strong>Pick ClickHouse (+ S3 or MinIO)</strong> if you run on AWS, Kubernetes, or hybrid hardware and want lower compute bills or full self-hosted control."
+  ]}
+/>
+
+Most comparisons of **Azure Data Explorer (ADX / Kusto)** and **ClickHouse** are written by vendors selling one of the two.
+
+When we built the warehouse layer for [Culprit SQL](https://culpritsql.com) (covered in [Microsoft Database Hub vs. Culprit + ADX](/blog/microsoft-database-hub-vs-culprit-adx/)), we refused to pick one cloud. We wrote two first-class Rust adapters - `culprit-store-adx` and `culprit-store-clickhouse` - against the exact same verified telemetry and Gold diagnosis contracts (`CulpritIncidentsV1`, `CulpritFindingsV1`, `CulpritChangesV1`).
+
+Building both adapters side by side exposed every practical quirk in how Kusto and ClickHouse handle 64-bit counters, nullable fields, deduplication, and monthly cloud bills.
+
+## Why database telemetry is nastier than HTTP access logs
+
+Database observability has three requirements that trip up naive time-series schemas:
+
+1. **Exact unsigned 64-bit counters and nanosecond clocks.** SQL Server LSNs, PostgreSQL XIDs, and cumulative wait counters exceed 53-bit JavaScript floats (`9,007,199,254,740,993` must round-trip without rounding), and short capture windows need nanosecond timestamp ordering.
+2. **Strict distinction between `NULL` (unmeasured) and `0` (measured zero).** If `VIEW DATABASE PERFORMANCE STATE` is missing, storing `0` deadlocks or `0` memory-grant waits lies to every downstream check.
+3. **Large immutable artifacts.** Execution plans (`.sqlplan`, `EXPLAIN JSON`) and `.xel` deadlock captures belong in object storage (Azure Blob or S3) keyed by SHA-256 digest, not stuffed inline into analytical columns that ruin columnstore compression.
+
+Both ADX and ClickHouse handle high-rate append workloads effortlessly, provided you respect how their storage engines differ.
+
+## Physical schema and query tradeoffs we hit in Rust
+
+| Engineering Dimension | Azure Data Explorer (`culprit-store-adx`) | ClickHouse (`culprit-store-clickhouse`) |
+| :--- | :--- | :--- |
+| **Query language** | KQL (stored functions with typed tabular parameters; great ergonomics for time-window joins and `arg_max`) | SQL (`MergeTree` ordered keys, CTEs, and `argMax` aggregates; familiar to every backend engineer) |
+| **Nulls & exact 64-bit ints** | Native nullable scalars + `dynamic` JSON bags; 64-bit signed `long` requires explicit decimal-string encoding for unsigned `u64` above `i64::MAX` | Native `UInt64`, `Int64`, `DateTime64(9, 'UTC')`, and `Nullable(T)` or `LowCardinality(String)` without auxiliary presence columns |
+| **Hot cache vs object storage** | Built-in SSD hot cache + automatic Azure Storage tiering managed by the Kusto service | S3-backed `MergeTree` disks on ClickHouse Cloud, or local NVMe + tiered S3 on self-hosted StatefulSets |
+| **Auth & network model** | First-class Entra Workload Identity (`az` / federated OIDC tokens) + Azure Private Link | Mutual TLS, SCRAM-SHA-256 credentials, or AWS IAM roles alongside S3 IRSA |
+| **Operational overhead** | Near zero (managed cluster + auto-stop on Dev/Test tiers) | Near zero on ClickHouse Cloud; moderate if self-hosting Keeper / replication on Kubernetes |
+
+<Callout title="Why we never put diagnosis math in KQL or ClickHouse SQL" tone="blue">
+  <p>
+    Maintaining 32 execution-plan rules and causal blocking-tree reducers twice (once in KQL and once in ClickHouse SQL) would guarantee drift. Culprit runs all plan diffing, incident attribution, and severity ranking once in pure Rust before ingest. KQL and ClickHouse SQL only filter published ranges, pick canonical heads, and paginate results.
+  </p>
+</Callout>
+
+## Monthly cost across 10, 50, and 300 databases
+
+Assuming standard 5-minute baseline schedules (`Activity`, `WaitCounters`, `Operational`, `Settings`, `DeadlockHistory`), episode-triggered `.sqlplan` recovery in Blob/S3, and 90 days of retention:
+
+<StatStrip
+  stats={[
+    { value: "~$35-$60/mo", label: "Self-hosted ClickHouse single node (4 vCPU / 16 GB + S3) for 10-50 DBs", tone: "green" },
+    { value: "~$150/mo", label: "ADX Dev/Test single node + Azure Blob (no SLA, ideal for non-critical or small fleets)", tone: "amber" },
+    { value: "~$590/mo", label: "2-node Production ADX (1-yr Reserved) or ClickHouse Cloud Prod for 50-300 DBs", tone: "default" }
+  ]}
+/>
+
+### Where ClickHouse wins on price
+- **5 to 50 databases on AWS or Kubernetes:** A single `m7g.xlarge` / Hetzner / AKS node running ClickHouse with S3 object tiering costs `$35 to $80/month` total, and ClickHouse Cloud's serverless/scale-to-zero dev tiers avoid paying idle hourly minimums.
+- **AWS RDS / Aurora fleets:** Keeping ClickHouse and S3 in the same AWS region avoids cross-cloud egress fees that you would pay shipping RDS plans into Azure.
+
+### Where ADX wins on simplicity
+- **Azure-heavy shops (50 to 500+ databases):** One Entra Workload Identity covers Azure SQL, PostgreSQL Flexible Server, Azure Blob, and ADX ingestion ([walkthrough here](/blog/monitor-azure-sql-postgres-fleet-aks-adx-helm/)). Kusto's caching policy (`alter table ... policy caching hot = 14d`) keeps 90-day queries fast without tuning disk policies.
+- **Shared Kusto estate:** If your platform team already ships AKS container logs and Envoy traces into ADX, adding `CulpritIncidentsV1` lets responders correlate an API spike with a SQL head blocker in one KQL tab.
+
+## Switching backends is one flag
+
+Because [`culprit-archive-web`](/blog/database-fleet-dashboard-adx-without-grafana-enterprise/), [`culprit-notify`](/blog/sql-blocking-deploy-regression-alerts-slack-teams-pagerduty/), and the [warehouse MCP server](/blog/database-mcp-server-autonomous-verified-index-prs/) talk to the segregated `WarehouseFleetReader` and `WarehouseIncidentReader` traits in `culprit-evidence`, switching between ADX and ClickHouse changes zero UI views, zero alert rules, and zero MCP prompts:
+
+```sh
+# Generate schema for ClickHouse instead of ADX:
+culprit collect schema --store clickhouse --database culprit > clickhouse-schema.sql
+
+# Render sharded collector configs targeting ClickHouse + S3:
+culprit collect sync-inventory \
+  --cloud aws --region us-east-1 \
+  --shards 2 \
+  --target-kind clickhouse \
+  --clickhouse-endpoint https://ch-internal.corp.example:8443 \
+  --s3-bucket culprit-evidence-prod \
+  --output-dir ./deploy/aws-fleet
+```
+
+Pick the store that sits closest to your databases and your existing identity provider; the diagnostic engine stays identical.

@@ -1,0 +1,111 @@
+---
+title: "SQL Server Containers on Apple Silicon: Rosetta, AVX & ARM64"
+seoTitle: "Running SQL Server Containers on Apple Silicon Macs (2027)"
+description: "Azure SQL Edge retired in September 2025, and macOS 28 narrows desktop Rosetta 2. What actually happens to Linux Docker containers on M-series Macs, why SQL Server 2025 hit AVX startup crashes, and when to switch to Microsoft's native ARM64 image."
+seoDescription: "Azure SQL Edge is retired and macOS 28 drops app Rosetta 2. What actually happens to Linux Docker containers, AVX crashes, and native ARM64 Azure SQL DB."
+pubDate: 2026-11-24
+author: "Cristian Pufu"
+readingMinutes: 6
+tags: ["SQL Server", "Azure SQL", "macOS", "Docker"]
+keywords: ["sql server docker apple silicon", "mssql container mac arm64", "mcr.microsoft.com/mssql/azure-sql-db-server", "macos 28 rosetta 2 docker linux containers", "azure sql edge retired alternative", "sql server 2025 avx assertion failed mac"]
+relatedSlug: "after-azure-data-studio"
+faq: [{"question": "Does Apple's macOS 28 Rosetta 2 phase-out break x86_64 Linux Docker containers?", "answer": "No. Apple's macOS 28 scope reduction targets user-space macOS Intel applications and Cocoa frameworks. Linux container runtimes (Docker Desktop, OrbStack, Podman, and Apple's container tool) run an ARM64 Linux kernel VM that translates x86_64 ELF binaries via Virtualization.framework's VZLinuxRosettaDirectoryShare (RosettaLinux), which is a separate hypervisor bridge."}, {"question": "What replaced Azure SQL Edge for native ARM64 containers on Mac?", "answer": "Azure SQL Edge retired on September 30, 2025. For native linux/arm64 execution on M1/M2/M3/M4 Macs without x86 emulation, Microsoft provides the Azure SQL Database local development container image (mcr.microsoft.com/mssql/azure-sql-db-server)."}, {"question": "Why did SQL Server 2025 containers crash with an x86_avx_state_ptr assertion on Apple Silicon?", "answer": "Early SQL Server 2025 builds probed x86 AVX XSAVE header feature bits that Rosetta's Linux translator did not expose identically to bare-metal Intel CPUs, triggering x86_avx_state_ptr->xsave_header.xfeatures == kSupportedXFeatureBits on startup. Updating macOS, your container runtime, and SQL Server 2025 CU builds (or using the native ARM64 Azure SQL DB image) avoids the crash."}]
+---
+
+import Callout from "../../components/Callout.astro";
+import KeyTakeaways from "../../components/KeyTakeaways.astro";
+import StatStrip from "../../components/StatStrip.astro";
+
+<KeyTakeaways
+  label="TL;DR"
+  items={[
+    "<strong>macOS 28 does NOT kill x86_64 Linux Docker containers:</strong> Apple is phasing out general-purpose Rosetta 2 for <em>macOS desktop apps</em> after macOS 27, while Linux VMs use a separate framework bridge (<code>VZLinuxRosettaDirectoryShare</code> / <code>RosettaLinux</code>).",
+    "<strong>The real pain points on Apple Silicon were Azure SQL Edge's retirement (Sept 30, 2025) and AVX translation crashes</strong> when SQL Server 2025 leaned into x86 vector instructions under emulation.",
+    "<strong>Your two working local options today:</strong> run Microsoft's native <code>linux/arm64</code> Azure SQL Database image (<code>mcr.microsoft.com/mssql/azure-sql-db-server</code>), or run <code>mssql/server:2022-latest</code> under <code>--platform linux/amd64</code> when testing boxed SQL Server features."
+  ]}
+/>
+
+A rumor keeps making the rounds in backend Slack channels: *"Apple is removing Rosetta 2 in macOS 28, so you won't be able to run SQL Server Docker containers on an Apple Silicon Mac anymore."*
+
+Because we test [Culprit SQL](https://culpritsql.com) daily against disposable SQL Server, PostgreSQL, MySQL, and YugabyteDB containers on M-series Macs, I dug into Apple's Virtualization documentation and Microsoft's container roadmap to separate what is actually retiring from what got conflated on social media.
+
+The short version: **Linux containers are fine, Azure SQL Edge is dead, and you finally have a real native ARM64 option.**
+
+## Myth vs. reality: macOS Rosetta 2 vs. `RosettaLinux`
+
+The confusion comes from Apple using the name "Rosetta" for two different layers:
+
+1. **macOS application Rosetta 2 (retiring after macOS 27):** Translates Intel (`x86_64`) Mach-O macOS apps and frameworks (AppKit, Cocoa, Intel plugins, printer drivers). Apple confirmed macOS 27 is the final release with full general-purpose support, shrinking in macOS 28 to a narrow subset for legacy unmaintained Intel games.
+2. **Rosetta for Linux VMs (`VZLinuxRosettaDirectoryShare`):** When you run an `amd64` container in Docker Desktop, OrbStack, Podman, or Apple's open-source `container` CLI, macOS boots a **native ARM64 Linux kernel VM**. Inside that Linux guest, `/Library/Apple/usr/libexec/oah/RosettaLinux` is mounted over `virtiofs` and registered with `binfmt_misc` to translate `x86_64` Linux ELF binaries directly to ARM64 instructions. It does not touch macOS desktop frameworks at all.
+
+## What actually broke SQL Server on Macs in 2025-2026
+
+Even though Linux binary translation stays alive, Mac developers hit two very real roadblocks over the past year:
+
+- **Azure SQL Edge retired on September 30, 2025.** For years, `mcr.microsoft.com/azure-sql-edge` was every Mac developer's favorite workaround because it shipped a fast `linux/arm64` build. Once Microsoft retired it and removed support, teams were pushed back toward `mcr.microsoft.com/mssql/server` (`amd64`-only).
+- **The SQL Server 2025 AVX assertion crash.** When SQL Server 2025 leaned harder into `x86` Advanced Vector Extensions (AVX), running `amd64` containers under Rosetta translation on certain macOS 26 ("Tahoe") and Docker combinations crashed immediately at boot with:
+
+```text
+sqlservr: assertion failed [x86_avx_state_ptr->xsave_header.xfeatures == kSupportedXFeatureBits]
+```
+
+That crash had nothing to do with Apple banning containers; it happened because SQL Server's startup check inspected simulated CPU `XSAVE` vector state flags under `x86_64` translation.
+
+<StatStrip
+  stats={[
+    { value: "linux/arm64", label: "azure-sql-db-server runs natively on M1/M2/M3/M4 without Rosetta or AVX emulation", tone: "green" },
+    { value: "Sept 30, 2025", label: "Official retirement date for Azure SQL Edge", tone: "amber" },
+    { value: "linux/amd64", label: "Still required for traditional boxed mssql/server (SQL Agent, Full-Text, AGs)", tone: "default" }
+  ]}
+/>
+
+## Option 1: Native ARM64 via the Azure SQL Database container (Recommended for dev)
+
+If your production target is Azure SQL Database (or your integration tests just need T-SQL, Query Store, rowstore/columnstore indexes, and JSON/vector types), stop emulating `x86_64`. Use Microsoft's **Azure SQL Database local container** (`mcr.microsoft.com/mssql/azure-sql-db-server`), which ships a native `linux/arm64` manifest:
+
+```sh
+docker run -d \
+  --name sql-arm \
+  -e ACCEPT_EULA=Y \
+  -e MSSQL_SA_PASSWORD='LocalDev-Password-2026!' \
+  -p 127.0.0.1:14333:1433 \
+  mcr.microsoft.com/mssql/azure-sql-db-server:latest
+```
+
+Cold boot drops from 20+ seconds under emulation to a couple of seconds, fan noise disappears, and memory-mapping / AVX translation bugs vanish because every instruction is native ARM64.
+
+## Option 2: Boxed `mssql/server:2022-latest` when you need instance-level features
+
+When we test Culprit's boxed SQL Server collectors (SQL Server Agent jobs, `msdb` suspect pages, instance-level `system_health` Extended Events `.xel` files, or Availability Group redo queues), we still spin up `mcr.microsoft.com/mssql/server:2022-latest` with explicit `--platform linux/amd64` and a 2 GB to 4 GB memory cap:
+
+```sh
+docker run -d \
+  --name sql2022-amd64 \
+  --platform linux/amd64 \
+  -e ACCEPT_EULA=Y \
+  -e MSSQL_SA_PASSWORD='LocalDev-Password-2026!' \
+  -e MSSQL_MEMORY_LIMIT_MB=2048 \
+  -p 127.0.0.1:14334:1433 \
+  mcr.microsoft.com/mssql/server:2022-latest
+```
+
+<Callout title="Keep emulation out of CI performance benchmarks" tone="amber">
+  <p>
+    Microsoft explicitly does not support running <code>mssql/server</code> under Rosetta, QEMU, or Prism for production or timing benchmarks. Use local Mac containers for schema/plan correctness, and run latency or memory-grant smoke suites on native <code>x86_64</code> Linux runners.
+  </p>
+</Callout>
+
+## Inspecting plans and slow queries on macOS now that Azure Data Studio is gone
+
+Running the database container is half the local workflow; the other half is having a fast native macOS client now that Azure Data Studio is retired too.
+
+I wrote up [my full post-Azure Data Studio macOS and VS Code workflow here](/blog/after-azure-data-studio/). If you want to scan that local container right from your Mac terminal to spot implicit conversions, missing indexes, or Key Lookups while developing:
+
+```sh
+culprit conn add local-sql --env local --password-env MSSQL_SA_PASSWORD \
+  --url 'mssql://sa@127.0.0.1:14333/app_dev?encrypt=false&trustServerCertificate=true'
+
+MSSQL_SA_PASSWORD='LocalDev-Password-2026!' culprit scan local-sql
+```
+
+Both the CLI and [Culprit SQL Studio](https://culpritsql.com) ship as native Universal / Apple Silicon binaries (`arm64`) under the MIT license, and [wire directly into Claude Code or Cursor via MCP](/blog/database-mcp-server-autonomous-verified-index-prs/) so you catch bad queries locally before they ever hit Azure.

@@ -14,6 +14,30 @@ const blog = defineCollection({
     tags: z.array(z.string()).default([]),
     keywords: z.array(z.string()).min(3),
     readingMinutes: z.number().int().positive(),
+    relatedSlug: z.string().optional(),
+    faq: z
+      .array(
+        z.object({
+          question: z.string(),
+          answer: z.string(),
+        }),
+      )
+      .optional(),
+    howTo: z
+      .object({
+        name: z.string(),
+        description: z.string(),
+        totalTime: z.string().optional(),
+        steps: z
+          .array(
+            z.object({
+              name: z.string(),
+              text: z.string(),
+            }),
+          )
+          .min(2),
+      })
+      .optional(),
   }),
 });
 

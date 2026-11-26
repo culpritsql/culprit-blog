@@ -1,0 +1,21 @@
+---
+import { getMssqlImplicitConversionDiffDemo } from "../lib/demoArtifacts";
+import { PlanDiffIsland } from "./PlanDiffIsland";
+
+const { a, b, diff, nameA, nameB, explainUrl } = await getMssqlImplicitConversionDiffDemo();
+const caption =
+  "Live @culpritsql/plan-viewer diff: sending an nvarchar(64) ORM parameter against a varchar(64) column forces CONVERT_IMPLICIT on the table column (19,420 logical reads across 1.25M rows vs 4 logical reads once the parameter type matches).";
+---
+
+<div class="blog-wide">
+  <PlanDiffIsland
+    client:visible
+    a={a}
+    b={b}
+    diff={diff}
+    nameA={nameA}
+    nameB={nameB}
+    explainUrl={explainUrl}
+    caption={caption}
+  />
+</div>

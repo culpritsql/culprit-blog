@@ -4,10 +4,12 @@ seoTitle: "After Azure Data Studio: .sqlplan & Deadlocks in VS Code"
 description: "Microsoft retired Azure Data Studio in February 2026. Here is how I inspect .sqlplan files, diff execution plans, and untangle deadlocks on macOS and in VS Code now."
 seoDescription: "Azure Data Studio retired Feb 28, 2026. Inspect SQL Server .sqlplan files, diff execution plans, and read .xdl deadlocks on macOS, Linux, and VS Code."
 pubDate: 2026-11-23
+updatedDate: 2026-11-26
 author: "Cristian Pufu"
 readingMinutes: 5
 tags: ["SQL Server", "Azure Data Studio", "VS Code", "Execution Plans"]
 keywords: ["Azure Data Studio retirement", "Azure Data Studio alternative", "open sqlplan on Mac", "VS Code sqlplan viewer", "SQL Server deadlock viewer"]
+relatedSlug: "sql-server-containers-apple-silicon-mac-rosetta-arm64"
 ---
 
 import Callout from "../../components/Callout.astro";
@@ -30,7 +32,7 @@ Microsoft retired Azure Data Studio on February 28, 2026. For years it was my de
 
 <Callout title="Where SSMS and VS Code mssql still fit" tone="blue">
   <p>
-    If you are on Windows doing server administration (backups, Availability Groups, Extended Events wizards), keep SSMS 21 installed. And for writing ad-hoc T-SQL in an editor, Microsoft's <code>mssql</code> extension in VS Code works fine.
+    If you are on Windows doing server administration (backups, Availability Groups, Extended Events wizards), keep SSMS 21 installed. And for writing ad-hoc T-SQL in an editor, Microsoft's <code>mssql</code> extension in VS Code works fine. Running local containers on an M-series Mac? See <a href="/blog/sql-server-containers-apple-silicon-mac-rosetta-arm64/">Running SQL Server Containers on Apple Silicon Macs: Rosetta, AVX, and Native ARM64</a>.
   </p>
 </Callout>
 
@@ -123,6 +125,6 @@ claude mcp add culprit -- culprit mcp
 culprit agent init --connection shop
 ```
 
-From there, the agent can inspect Query Store regressions, pull execution plans, or test a proposed PostgreSQL index via HypoPG (`--with-index`) while read-only guardrails stay enforced locally.
+From there, the agent can inspect Query Store regressions, pull execution plans, or test a proposed PostgreSQL index via HypoPG (`--with-index`) while read-only guardrails stay enforced locally. For production fleets streaming into ADX or ClickHouse, see how we pair [warehouse MCP plan tools with `culprit lint-sql` to open verified index PRs](/blog/database-mcp-server-autonomous-verified-index-prs/).
 
 Everything is MIT-licensed on [GitHub (@culpritsql)](https://github.com/culpritsql). If you run into a `.sqlplan` or deadlock capture that trips the parser, open an issue with a redacted snippet and I will fix it.

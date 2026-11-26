@@ -24,8 +24,8 @@ function escapeXml(str) {
     .replace(/'/g, "&apos;");
 }
 
-function wrapTitleLines(title, maxCharsPerLine = 28) {
-  const words = title.split(/\s+/);
+function wrapWords(text, maxCharsPerLine) {
+  const words = text.split(/\s+/);
   const lines = [];
   let cur = "";
   for (const w of words) {
@@ -38,7 +38,18 @@ function wrapTitleLines(title, maxCharsPerLine = 28) {
     }
   }
   if (cur) lines.push(cur);
-  return lines.slice(0, 3);
+  return lines;
+}
+
+function wrapTitleLines(title, maxCharsPerLine = 28) {
+  let lines = wrapWords(title, maxCharsPerLine);
+  if (lines.length > 3) {
+    lines = wrapWords(title, 34);
+  }
+  if (lines.length > 3) {
+    throw new Error(`OG card title exceeds 3 lines even at 34 chars/line: "${title}"`);
+  }
+  return lines;
 }
 
 function wrapDescLines(desc, maxCharsPerLine = 84) {
@@ -157,7 +168,10 @@ function parseFrontmatter(raw) {
     if (!kv) continue;
     const key = kv[1];
     let val = kv[2].trim();
-    if (val.startsWith("[") && val.endsWith("]")) {
+    if (
+      (val.startsWith("[") && val.endsWith("]")) ||
+      (val.startsWith("{") && val.endsWith("}"))
+    ) {
       meta[key] = JSON.parse(val);
       continue;
     }
@@ -173,6 +187,7 @@ function stripHtmlTags(str) {
   return str
     .replace(/<\/?strong>/g, "**")
     .replace(/<\/?code>/g, "`")
+    .replace(/<a\s+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g, "[$2]($1)")
     .replace(/<[^>]+>/g, "");
 }
 
@@ -212,9 +227,18 @@ function cleanMdxBodyForMarkdown(body) {
       "> [Interactive SQL Server .sqlplan Before/After comparison available on the web version](https://explain.culpritsql.com/compare)",
     )
     .replace(
+      /<MssqlRegressionDiffEmbed\s*\/>/g,
+      "> [Interactive SQL Server .sqlplan regression comparison available on the web version](https://explain.culpritsql.com/compare)",
+    )
+    .replace(
+      /<MssqlImplicitConversionEmbed\s*\/>/g,
+      "> [Interactive SQL Server CONVERT_IMPLICIT .sqlplan comparison available on the web version](https://explain.culpritsql.com/compare)",
+    )
+    .replace(
       /<MssqlDeadlockEmbed\s*\/>/g,
       "> [Interactive SQL Server .xdl deadlock cycle graph available on the web version](https://explain.culpritsql.com/deadlock)",
     )
+    .replace(/\]\(\/blog\//g, "](https://culpritsql.com/blog/")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
@@ -242,7 +266,14 @@ for (const file of files) {
   const raw = fs.readFileSync(path.join(contentDir, file), "utf8");
   const { meta, body } = parseFrontmatter(raw);
   const cleanBody = cleanMdxBodyForMarkdown(body);
-  const mdOut = `# ${meta.title}\n\nPublished: ${meta.pubDate} · Author: ${meta.author || "Cristian Pufu"} · Canonical: https://culpritsql.com/blog/${slug}/\n\n${meta.description}\n\n---\n\n${cleanBody}\n`;
+  const faqBlock =
+    Array.isArray(meta.faq) && meta.faq.length > 0
+      ? `\n\n## Frequently asked questions\n\n${meta.faq
+          .map((item) => `### ${item.question}\n\n${item.answer}`)
+          .join("\n\n")}`
+      : "";
+  const updatedNote = meta.updatedDate ? ` · Updated: ${meta.updatedDate}` : "";
+  const mdOut = `# ${meta.title}\n\nPublished: ${meta.pubDate}${updatedNote} · Author: ${meta.author || "Cristian Pufu"} · Canonical: https://culpritsql.com/blog/${slug}/\n\n${meta.description}\n\n---\n\n${cleanBody}${faqBlock}\n`;
 
   fs.writeFileSync(path.join(distDir, `${slug}.md`), mdOut, "utf8");
 
@@ -266,6 +297,7 @@ for (const file of files) {
     seoTitle: meta.seoTitle,
     description: meta.seoDescription || meta.description,
     pubDate: meta.pubDate,
+    ...(meta.updatedDate ? { updatedDate: meta.updatedDate } : {}),
     url: `https://culpritsql.com/blog/${slug}/`,
     markdownUrl: `https://culpritsql.com/blog/${slug}.md`,
     ogImageUrl: `https://culpritsql.com/blog/${slug}/og.png`,

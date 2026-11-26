@@ -11,9 +11,10 @@ keywords: ["azure data explorer dashboard without grafana enterprise", "database
 relatedSlug: "microsoft-database-hub-vs-culprit-adx"
 ---
 
+import ArchiveFleetShot from "../../components/ArchiveFleetShot.astro";
 import Callout from "../../components/Callout.astro";
 import KeyTakeaways from "../../components/KeyTakeaways.astro";
-import MssqlRegressionDiffEmbed from "../../components/MssqlRegressionDiffEmbed.astro";
+import MssqlElasticPoolDiffEmbed from "../../components/MssqlElasticPoolDiffEmbed.astro";
 import StatStrip from "../../components/StatStrip.astro";
 
 <KeyTakeaways
@@ -45,17 +46,19 @@ When someone opens a fleet view during a slowdown, they are not looking for fort
 3. **Is an Elastic Pool or Managed Instance suffering from a noisy neighbor?** (shared-compute grouping attested by native metadata)
 4. **Are any collectors stale or missing permissions?** (`collector_failing` / `partial` vs genuinely quiet)
 
-We built `WarehouseFleetReader` over `<Prefix>FleetSummary` in both ADX and [ClickHouse](/blog/azure-data-explorer-vs-clickhouse-database-telemetry/), and surfaced it as the top-level **Estate Triage** grid inside Culprit's `Archives` view. Filter chips (`Needs attention`, `Incidents`, `Regressions`, `High findings`, `Collector health`, `By Elastic Pool / Instance`) and `/` + `j`/`k` keyboard navigation work identically in the desktop app and in the browser.
+We built `WarehouseFleetReader` over `<Prefix>FleetSummary` in both ADX and [ClickHouse](/blog/azure-data-explorer-vs-clickhouse-database-telemetry/), and surfaced it as the top-level **Estate Triage** grid inside Culprit's `Archives` view. Filter chips (`Needs attention`, `Incidents`, `Changes & regressions`, `High findings`, `Collector health`, `By Elastic Pool / Instance`) and `/` + `j`/`k` keyboard navigation work identically in the desktop app and in the browser:
+
+<ArchiveFleetShot variant="elastic-pool" />
 
 ## Drilling from an Elastic Pool spike into the exact plan flip
 
-Suppose an Elastic Pool starts throttling writes and CPU climbs across six tenant databases. Grouping by `Elastic Pool` immediately shows five databases waiting on `RESOURCE_GOVERNOR` while one database (`billing-prod`) accounts for the new CPU jump after a plan switch.
+Suppose an Elastic Pool starts throttling writes and CPU climbs across six tenant databases. Grouping by `By Elastic Pool / Instance` immediately shows sibling databases waiting on `RESOURCE_GOVERNOR` inside `pool-saas-prod` while `tenant-analytics` accounts for the vCore jump.
 
-Clicking that regression in `Archives` pulls the sealed baseline and regressed `.sqlplan` blobs from Azure Storage, verifies their SHA-256 digests against the warehouse manifest, and opens the synchronized plan diff right in the browser:
+Clicking into `tenant-analytics` in `Archives` pulls the sealed `.sqlplan` blobs from Azure Storage, verifies their SHA-256 digests against `CulpritPublishedRangesV1`, and opens the synchronized plan diff right in the browser:
 
-<MssqlRegressionDiffEmbed />
+<MssqlElasticPoolDiffEmbed />
 
-Instead of pasting KQL query hashes into SSMS on a jumpbox, every engineer on the incident call can click the operator tree and see that `@tenant_id = 9001` poisoned the cached plan with two Clustered Index Scans and a TempDB sort spill.
+Instead of pasting KQL query hashes into SSMS on a jumpbox, every engineer on the incident call can click the operator tree and see that an unindexed rollup on `usage.daily_api_events` fanned out to `DOP = 4` (`1,180 ms` CPU across four workers and `148,200` logical reads), whereas a composite covering index drops it to a single-threaded `Stream Aggregate` + `Index Seek` (`6 ms` CPU, `38` reads).
 
 ## Running `culprit-archive-web` behind Entra EasyAuth or OIDC
 

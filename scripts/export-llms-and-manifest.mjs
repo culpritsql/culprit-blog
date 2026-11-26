@@ -188,7 +188,10 @@ function stripHtmlTags(str) {
     .replace(/<\/?strong>/g, "**")
     .replace(/<\/?code>/g, "`")
     .replace(/<a\s+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g, "[$2]($1)")
-    .replace(/<[^>]+>/g, "");
+    .replace(/<[^>]+>/g, "")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
 }
 
 function cleanMdxBodyForMarkdown(body) {
@@ -223,6 +226,14 @@ function cleanMdxBodyForMarkdown(body) {
       return cards.join("\n");
     })
     .replace(
+      /<ArchiveFleetShot\s+variant="elastic-pool"\s*\/>/g,
+      "> [Screenshot: culprit-archive-web Estate Triage grouped by Elastic Pool and Managed Instance](https://culpritsql.com/blog/images/archive-fleet-elastic-pool-light.webp)",
+    )
+    .replace(
+      /<ArchiveFleetShot\s+variant="multiengine"\s*\/>/g,
+      "> [Screenshot: culprit-archive-web multi-engine Estate Triage across Azure SQL, PostgreSQL, MySQL, and SQL MI](https://culpritsql.com/blog/images/archive-fleet-multiengine-light.webp)",
+    )
+    .replace(
       /<MssqlPlanDiffEmbed\s*\/>/g,
       "> [Interactive SQL Server .sqlplan Before/After comparison available on the web version](https://explain.culpritsql.com/compare)",
     )
@@ -231,12 +242,24 @@ function cleanMdxBodyForMarkdown(body) {
       "> [Interactive SQL Server .sqlplan regression comparison available on the web version](https://explain.culpritsql.com/compare)",
     )
     .replace(
+      /<MssqlElasticPoolDiffEmbed\s*\/>/g,
+      "> [Interactive SQL Server Elastic Pool DOP=4 noisy-neighbor .sqlplan comparison available on the web version](https://explain.culpritsql.com/compare)",
+    )
+    .replace(
+      /<PostgresMcpPlanDiffEmbed\s*\/>/g,
+      "> [Interactive PostgreSQL EXPLAIN JSON Before/After comparison available on the web version](https://explain.culpritsql.com/compare)",
+    )
+    .replace(
       /<MssqlImplicitConversionEmbed\s*\/>/g,
       "> [Interactive SQL Server CONVERT_IMPLICIT .sqlplan comparison available on the web version](https://explain.culpritsql.com/compare)",
     )
     .replace(
       /<MssqlDeadlockEmbed\s*\/>/g,
       "> [Interactive SQL Server .xdl deadlock cycle graph available on the web version](https://explain.culpritsql.com/deadlock)",
+    )
+    .replace(
+      /<MssqlWebhookDeadlockEmbed\s*\/>/g,
+      "> [Interactive SQL Server billing webhook .xdl deadlock graph available on the web version](https://explain.culpritsql.com/deadlock)",
     )
     .replace(/\]\(\/blog\//g, "](https://culpritsql.com/blog/")
     .replace(/\n{3,}/g, "\n\n")

@@ -343,3 +343,281 @@ export async function getMssqlImplicitConversionDiffDemo(): Promise<{
   });
   return { a, b, diff, nameA, nameB, explainUrl };
 }
+
+const MSSQL_ELASTIC_POOL_NOISY_SCAN_XML = `<ShowPlanXML xmlns="http://schemas.microsoft.com/sqlserver/2004/07/showplan" Version="1.564" Build="16.0.4295.3">
+  <BatchSequence><Batch><Statements>
+    <StmtSimple StatementText="SELECT workspace_id, route_group, COUNT_BIG(*) AS calls, SUM(duration_ms) AS total_ms FROM usage.daily_api_events WHERE billable = 1 AND bucket_date >= @since_date GROUP BY workspace_id, route_group" StatementId="1" StatementCompId="1" StatementType="SELECT" StatementSubTreeCost="94.60" StatementEstRows="1840" StatementOptmLevel="FULL" CardinalityEstimationModelVersion="160">
+      <QueryPlan DegreeOfParallelism="4" MemoryGrant="16384" CachedPlanSize="88" CompileTime="16" CompileCPU="14">
+        <MissingIndexes>
+          <MissingIndexGroup Impact="96.8">
+            <MissingIndex Database="[tenant_analytics]" Schema="[usage]" Table="[daily_api_events]">
+              <ColumnGroup Usage="EQUALITY"><Column Name="[billable]" ColumnId="6"/></ColumnGroup>
+              <ColumnGroup Usage="INEQUALITY"><Column Name="[bucket_date]" ColumnId="3"/></ColumnGroup>
+              <ColumnGroup Usage="INCLUDE"><Column Name="[workspace_id]" ColumnId="2"/><Column Name="[route_group]" ColumnId="4"/><Column Name="[duration_ms]" ColumnId="7"/></ColumnGroup>
+            </MissingIndex>
+          </MissingIndexGroup>
+        </MissingIndexes>
+        <QueryTimeStats ElapsedTime="342" CpuTime="1180"/>
+        <RelOp NodeId="0" PhysicalOp="Parallelism" LogicalOp="Gather Streams" EstimateRows="1840" EstimateIO="0" EstimateCPU="0.09" AvgRowSize="52" EstimatedTotalSubtreeCost="94.60" Parallel="1" EstimatedExecutionMode="Row">
+          <RunTimeInformation>
+            <RunTimeCountersPerThread Thread="0" ActualRows="312" ActualElapsedms="342" ActualCPUms="12" ActualExecutions="1" ActualExecutionMode="Row"/>
+          </RunTimeInformation>
+          <Parallelism>
+            <RelOp NodeId="1" PhysicalOp="Hash Match" LogicalOp="Aggregate" EstimateRows="1840" EstimateIO="0" EstimateCPU="6.84" AvgRowSize="52" EstimatedTotalSubtreeCost="94.51" Parallel="1" EstimatedExecutionMode="Row">
+              <RunTimeInformation>
+                <RunTimeCountersPerThread Thread="1" ActualRows="82" ActualElapsedms="336" ActualCPUms="294" ActualExecutions="1" ActualExecutionMode="Row"/>
+                <RunTimeCountersPerThread Thread="2" ActualRows="76" ActualElapsedms="338" ActualCPUms="298" ActualExecutions="1" ActualExecutionMode="Row"/>
+                <RunTimeCountersPerThread Thread="3" ActualRows="79" ActualElapsedms="335" ActualCPUms="289" ActualExecutions="1" ActualExecutionMode="Row"/>
+                <RunTimeCountersPerThread Thread="4" ActualRows="75" ActualElapsedms="337" ActualCPUms="287" ActualExecutions="1" ActualExecutionMode="Row"/>
+              </RunTimeInformation>
+              <Hash>
+                <RelOp NodeId="2" PhysicalOp="Clustered Index Scan" LogicalOp="Clustered Index Scan" EstimateRows="485000" EstimatedRowsRead="8400000" EstimateIO="78.42" EstimateCPU="9.25" AvgRowSize="44" EstimatedTotalSubtreeCost="87.67" TableCardinality="8400000" Parallel="1" EstimatedExecutionMode="Row">
+                  <RunTimeInformation>
+                    <RunTimeCountersPerThread Thread="1" ActualRows="1120" ActualElapsedms="286" ActualCPUms="252" ActualScans="1" ActualLogicalReads="37120" ActualPhysicalReads="610" ActualExecutions="1" ActualExecutionMode="Row"/>
+                    <RunTimeCountersPerThread Thread="2" ActualRows="1040" ActualElapsedms="289" ActualCPUms="256" ActualScans="1" ActualLogicalReads="36980" ActualPhysicalReads="590" ActualExecutions="1" ActualExecutionMode="Row"/>
+                    <RunTimeCountersPerThread Thread="3" ActualRows="980" ActualElapsedms="284" ActualCPUms="248" ActualScans="1" ActualLogicalReads="37050" ActualPhysicalReads="605" ActualExecutions="1" ActualExecutionMode="Row"/>
+                    <RunTimeCountersPerThread Thread="4" ActualRows="980" ActualElapsedms="285" ActualCPUms="249" ActualScans="1" ActualLogicalReads="37050" ActualPhysicalReads="585" ActualExecutions="1" ActualExecutionMode="Row"/>
+                  </RunTimeInformation>
+                  <IndexScan Ordered="0" Storage="RowStore">
+                    <Object Database="[tenant_analytics]" Schema="[usage]" Table="[daily_api_events]" Index="[pk_daily_api_events]" IndexKind="Clustered" Storage="RowStore"/>
+                  </IndexScan>
+                </RelOp>
+              </Hash>
+            </RelOp>
+          </Parallelism>
+        </RelOp>
+        <ParameterList>
+          <ColumnReference Column="@since_date" ParameterDataType="date" ParameterCompiledValue="('2026-09-01')" ParameterRuntimeValue="('2026-11-26')"/>
+        </ParameterList>
+      </QueryPlan>
+    </StmtSimple>
+  </Statements></Batch></BatchSequence>
+</ShowPlanXML>`;
+
+const MSSQL_ELASTIC_POOL_INDEXED_SEEK_XML = `<ShowPlanXML xmlns="http://schemas.microsoft.com/sqlserver/2004/07/showplan" Version="1.564" Build="16.0.4295.3">
+  <BatchSequence><Batch><Statements>
+    <StmtSimple StatementText="SELECT workspace_id, route_group, COUNT_BIG(*) AS calls, SUM(duration_ms) AS total_ms FROM usage.daily_api_events WHERE billable = 1 AND bucket_date >= @since_date GROUP BY workspace_id, route_group" StatementId="1" StatementCompId="1" StatementType="SELECT" StatementSubTreeCost="0.068" StatementEstRows="312" StatementOptmLevel="FULL" CardinalityEstimationModelVersion="160">
+      <QueryPlan DegreeOfParallelism="1" CachedPlanSize="32" CompileTime="4" CompileCPU="4">
+        <QueryTimeStats ElapsedTime="6" CpuTime="6"/>
+        <RelOp NodeId="0" PhysicalOp="Stream Aggregate" LogicalOp="Aggregate" EstimateRows="312" EstimateIO="0" EstimateCPU="0.0042" AvgRowSize="52" EstimatedTotalSubtreeCost="0.068" Parallel="0" EstimatedExecutionMode="Row">
+          <RunTimeInformation>
+            <RunTimeCountersPerThread Thread="0" ActualRows="312" ActualElapsedms="6" ActualCPUms="6" ActualExecutions="1" ActualExecutionMode="Row"/>
+          </RunTimeInformation>
+          <StreamAggregate>
+            <RelOp NodeId="1" PhysicalOp="Index Seek" LogicalOp="Index Seek" EstimateRows="4120" EstimatedRowsRead="4120" EstimateIO="0.058" EstimateCPU="0.0058" AvgRowSize="44" EstimatedTotalSubtreeCost="0.0638" TableCardinality="8400000" Parallel="0" EstimatedExecutionMode="Row">
+              <RunTimeInformation>
+                <RunTimeCountersPerThread Thread="0" ActualRows="4120" ActualElapsedms="4" ActualCPUms="4" ActualScans="1" ActualLogicalReads="38" ActualPhysicalReads="0" ActualExecutions="1" ActualExecutionMode="Row"/>
+              </RunTimeInformation>
+              <IndexScan Ordered="1" ScanDirection="FORWARD" Storage="RowStore">
+                <Object Database="[tenant_analytics]" Schema="[usage]" Table="[daily_api_events]" Index="[ix_daily_api_events_billable_bucket]" IndexKind="NonClustered" Storage="RowStore"/>
+              </IndexScan>
+            </RelOp>
+          </StreamAggregate>
+        </RelOp>
+        <ParameterList>
+          <ColumnReference Column="@since_date" ParameterDataType="date" ParameterCompiledValue="('2026-11-26')" ParameterRuntimeValue="('2026-11-26')"/>
+        </ParameterList>
+      </QueryPlan>
+    </StmtSimple>
+  </Statements></Batch></BatchSequence>
+</ShowPlanXML>`;
+
+export async function getMssqlElasticPoolDiffDemo(): Promise<{
+  a: Plan;
+  b: Plan;
+  diff: PlanDiff;
+  nameA: string;
+  nameB: string;
+  explainUrl: string;
+}> {
+  await ensureNodeWasm();
+  const nameA = "DOP=4 pool scan";
+  const nameB = "Covering index seek";
+  const a = plans.parsePlan(MSSQL_ELASTIC_POOL_NOISY_SCAN_XML, "mssql");
+  const b = plans.parsePlan(MSSQL_ELASTIC_POOL_INDEXED_SEEK_XML, "mssql");
+  const diff = plans.diffPlans(a, nameA, b, nameB);
+  const explainUrl = buildExplainShareUrl("compare", {
+    v: 1,
+    m: "compare",
+    e: "mssql",
+    na: nameA,
+    pa: MSSQL_ELASTIC_POOL_NOISY_SCAN_XML,
+    nb: nameB,
+    pb: MSSQL_ELASTIC_POOL_INDEXED_SEEK_XML,
+  });
+  return { a, b, diff, nameA, nameB, explainUrl };
+}
+
+const MSSQL_WEBHOOK_DEADLOCK_XML = `<deadlock>
+  <victim-list>
+    <victimProcess id="process310"/>
+  </victim-list>
+  <process-list>
+    <process id="process310" spid="88" clientapp="stripe-webhook-worker" loginname="app_billing" hostname="billing-pod-04" isolationlevel="read committed (2)" waitresource="KEY: 9:72057594058113024 (9c220a81e412)" waittime="2410" status="suspended" lastbatchstarted="2026-11-25T22:18:41.120">
+      <executionStack>
+        <frame procname="adhoc" sqlhandle="0x11">UPDATE billing.ledger_entries SET settled_at = SYSUTCDATETIME() WHERE subscription_id = @sub_id AND period_key = @period;</frame>
+      </executionStack>
+      <inputbuf>BEGIN TRAN; UPDATE billing.subscriptions SET status = 'active', updated_at = SYSUTCDATETIME() WHERE id = 50491; UPDATE billing.ledger_entries SET settled_at = SYSUTCDATETIME() WHERE subscription_id = 50491 AND period_key = '2026-11';</inputbuf>
+    </process>
+    <process id="process311" spid="134" clientapp="invoice-reconciler" loginname="app_reconciler" hostname="reconcile-cron-01" isolationlevel="repeatable read (3)" waitresource="KEY: 9:72057594056474624 (51e84029ab10)" waittime="2395" status="suspended" lastbatchstarted="2026-11-25T22:18:41.135">
+      <executionStack>
+        <frame procname="adhoc" sqlhandle="0x12">UPDATE billing.subscriptions SET balance_cents = balance_cents - @paid WHERE id = @sub_id;</frame>
+      </executionStack>
+      <inputbuf>BEGIN TRAN; UPDATE billing.ledger_entries SET reconciled = 1 WHERE subscription_id = 50491 AND period_key = '2026-11'; UPDATE billing.subscriptions SET balance_cents = balance_cents - 4900 WHERE id = 50491;</inputbuf>
+    </process>
+  </process-list>
+  <resource-list>
+    <keylock hobtid="72057594056474624" dbid="9" objectname="billing_prod.billing.subscriptions" indexname="PK_subscriptions" id="lock_subs" mode="X">
+      <owner-list><owner id="process310" mode="X"/></owner-list>
+      <waiter-list><waiter id="process311" mode="U" requestType="wait"/></waiter-list>
+    </keylock>
+    <keylock hobtid="72057594058113024" dbid="9" objectname="billing_prod.billing.ledger_entries" indexname="IX_ledger_sub_period" id="lock_ledger" mode="X">
+      <owner-list><owner id="process311" mode="X"/></owner-list>
+      <waiter-list><waiter id="process310" mode="U" requestType="wait"/></waiter-list>
+    </keylock>
+  </resource-list>
+</deadlock>`;
+
+export async function getMssqlWebhookDeadlockDemo(): Promise<{
+  deadlock: Deadlock;
+  explainUrl: string;
+}> {
+  await ensureNodeWasm();
+  const list = plans.parseDeadlock(MSSQL_WEBHOOK_DEADLOCK_XML);
+  const explainUrl = buildExplainShareUrl("deadlock", {
+    v: 1,
+    m: "deadlock",
+    t: "Webhook Worker vs Invoice Reconciler (.xdl)",
+    d: MSSQL_WEBHOOK_DEADLOCK_XML,
+  });
+  return { deadlock: list[0]!, explainUrl };
+}
+
+const PG_SEQ_SCAN_AUDIT_JSON = JSON.stringify([
+  {
+    Plan: {
+      "Node Type": "Limit",
+      "Startup Cost": 48210.4,
+      "Total Cost": 48210.52,
+      "Plan Rows": 50,
+      "Plan Width": 168,
+      "Actual Startup Time": 245.8,
+      "Actual Total Time": 246.1,
+      "Actual Rows": 50,
+      "Actual Loops": 1,
+      "Shared Hit Blocks": 32400,
+      "Shared Read Blocks": 8800,
+      Plans: [
+        {
+          "Node Type": "Sort",
+          "Parent Relationship": "Outer",
+          "Sort Key": ["created_at DESC"],
+          "Sort Method": "top-N heapsort",
+          "Sort Space Used": 42,
+          "Sort Space Type": "Memory",
+          "Startup Cost": 48210.4,
+          "Total Cost": 48241.9,
+          "Plan Rows": 12600,
+          "Plan Width": 168,
+          "Actual Startup Time": 245.7,
+          "Actual Total Time": 246.0,
+          "Actual Rows": 50,
+          "Actual Loops": 1,
+          "Shared Hit Blocks": 32400,
+          "Shared Read Blocks": 8800,
+          Plans: [
+            {
+              "Node Type": "Seq Scan",
+              "Parent Relationship": "Outer",
+              "Relation Name": "audit_events",
+              Schema: "public",
+              Alias: "audit_events",
+              "Startup Cost": 0.0,
+              "Total Cost": 47890.0,
+              "Plan Rows": 12600,
+              "Plan Width": 168,
+              "Actual Startup Time": 0.04,
+              "Actual Total Time": 238.4,
+              "Actual Rows": 14200,
+              "Actual Loops": 1,
+              Filter: "((org_id = 481) AND ((action)::text = 'api_key.rotated'::text))",
+              "Rows Removed by Filter": 2385800,
+              "Shared Hit Blocks": 32400,
+              "Shared Read Blocks": 8800,
+            },
+          ],
+        },
+      ],
+    },
+    "Planning Time": 0.28,
+    "Execution Time": 246.2,
+  },
+]);
+
+const PG_CONCURRENT_INDEX_AUDIT_JSON = JSON.stringify([
+  {
+    Plan: {
+      "Node Type": "Limit",
+      "Startup Cost": 0.43,
+      "Total Cost": 4.88,
+      "Plan Rows": 50,
+      "Plan Width": 168,
+      "Actual Startup Time": 0.05,
+      "Actual Total Time": 1.38,
+      "Actual Rows": 50,
+      "Actual Loops": 1,
+      "Shared Hit Blocks": 6,
+      "Shared Read Blocks": 0,
+      Plans: [
+        {
+          "Node Type": "Index Scan",
+          "Parent Relationship": "Outer",
+          "Scan Direction": "Backward",
+          "Index Name": "audit_events_org_action_created_idx",
+          "Relation Name": "audit_events",
+          Schema: "public",
+          Alias: "audit_events",
+          "Startup Cost": 0.43,
+          "Total Cost": 112.4,
+          "Plan Rows": 1260,
+          "Plan Width": 168,
+          "Actual Startup Time": 0.05,
+          "Actual Total Time": 1.34,
+          "Actual Rows": 50,
+          "Actual Loops": 1,
+          "Index Cond": "((org_id = 481) AND ((action)::text = 'api_key.rotated'::text))",
+          "Shared Hit Blocks": 6,
+          "Shared Read Blocks": 0,
+        },
+      ],
+    },
+    "Planning Time": 0.14,
+    "Execution Time": 1.42,
+  },
+]);
+
+export async function getPostgresMcpPlanDiffDemo(): Promise<{
+  a: Plan;
+  b: Plan;
+  diff: PlanDiff;
+  nameA: string;
+  nameB: string;
+  explainUrl: string;
+}> {
+  await ensureNodeWasm();
+  const nameA = "Seq Scan (2.4M rows)";
+  const nameB = "CONCURRENTLY index";
+  const a = plans.parsePlan(PG_SEQ_SCAN_AUDIT_JSON, "postgres");
+  const b = plans.parsePlan(PG_CONCURRENT_INDEX_AUDIT_JSON, "postgres");
+  const diff = plans.diffPlans(a, nameA, b, nameB);
+  const explainUrl = buildExplainShareUrl("compare", {
+    v: 1,
+    m: "compare",
+    e: "postgres",
+    na: nameA,
+    pa: PG_SEQ_SCAN_AUDIT_JSON,
+    nb: nameB,
+    pb: PG_CONCURRENT_INDEX_AUDIT_JSON,
+  });
+  return { a, b, diff, nameA, nameB, explainUrl };
+}

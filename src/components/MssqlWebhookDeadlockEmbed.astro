@@ -1,0 +1,12 @@
+---
+import { getMssqlWebhookDeadlockDemo } from "../lib/demoArtifacts";
+import { DeadlockIsland } from "./DeadlockIsland";
+
+const { deadlock, explainUrl } = await getMssqlWebhookDeadlockDemo();
+const caption =
+  "Live @culpritsql/plan-viewer graph: stripe-webhook-worker (SPID 88) locked PK_subscriptions then waited on IX_ledger_sub_period, while invoice-reconciler (SPID 134) locked IX_ledger_sub_period under REPEATABLE READ and waited on PK_subscriptions.";
+---
+
+<div class="blog-wide">
+  <DeadlockIsland client:visible deadlock={deadlock} explainUrl={explainUrl} caption={caption} />
+</div>

@@ -13,7 +13,7 @@ relatedSlug: "why-database-monitors-cry-wolf-seven-evidence-rules"
 
 import Callout from "../../components/Callout.astro";
 import KeyTakeaways from "../../components/KeyTakeaways.astro";
-import MssqlDeadlockEmbed from "../../components/MssqlDeadlockEmbed.astro";
+import MssqlWebhookDeadlockEmbed from "../../components/MssqlWebhookDeadlockEmbed.astro";
 import StatStrip from "../../components/StatStrip.astro";
 
 <KeyTakeaways
@@ -37,9 +37,9 @@ In Culprit's collector pipeline, blocking chains, metadata-lock sandwiches (`LCK
 
 Take deadlocks. Instead of alerting *"Deadlock count > 0"* and leaving you to hunt down `.xel` files or ring buffers, the collector parses the deadlock XML (or PostgreSQL log / MySQL `INNODB STATUS`), redacts SQL literals, and records both the killed victim and the surviving lock holder:
 
-<MssqlDeadlockEmbed />
+<MssqlWebhookDeadlockEmbed />
 
-Hover either session node above: the incident record already knows that `checkout-worker` (SPID 74) and `fulfillment-sync` (SPID 112) acquired `PK_orders` and `PK_inventory` in opposite order, which statement lost, and how to reorder the transaction.
+Hover either session node above: the incident record already knows that `stripe-webhook-worker` (SPID 88) and `invoice-reconciler` (SPID 134) acquired `PK_subscriptions` and `IX_ledger_sub_period` in opposite order, which statement lost, and how to reorder the transaction.
 
 ## Three warehouse alert streams (plus collector health)
 
@@ -47,10 +47,26 @@ When you run `culprit collect queries --config archive.json --name Prod`, Culpri
 
 | Generated Helper | What triggers it | Typical routing |
 | :--- | :--- | :--- |
-| `ProdRecordedIncidentAlertsDuring` | Active/resolved episodes in `CulpritIncidentsV1` (blocking chains, deadlocks, OOM, worker/grant starvation) | PagerDuty + `#db-incidents` Slack |
+| `ProdRecordedIncidentAlertsDuring` | Active/resolved episodes in `CulpritIncidentsV1` (blocking chains, deadlocks, `PAGELATCH_EX`, `THREADPOOL`, memory grants) | PagerDuty + `#db-incidents` Slack |
 | `ProdNewRegressionsDuring` | `CulpritChangesV1` queries that got slower or switched plans past impact threshold (enriched with `culprit mark` deploy timestamps) | `#eng-releases` Slack / Teams |
-| `ProdNewHighFindingsDuring` | Newly observed `high`-severity actionable findings in `CulpritFindingsV1` (e.g. `log-reuse-blocked`, missing critical index) | GitHub Issues / `#db-tuning` |
-| `ProdStatus` | Stale collector heartbeats, revoked `VIEW DATABASE PERFORMANCE STATE`, or incomplete reads | Platform / infra ops channel |
+| `ProdNewHighFindingsDuring` | Newly observed `high`-severity actionable findings in `CulpritFindingsV1` (e.g. `log-reuse-blocked`, XID wraparound, missing index) | GitHub Issues / `#db-tuning` |
+| `ProdStatusNow` / `ProdStatus` | Stale collector heartbeats, revoked `VIEW DATABASE PERFORMANCE STATE`, or incomplete reads | Platform / infra ops channel |
+
+If your team already triggers DRI pages from **Azure Monitor Scheduled Query Rules** (over ADX) or **Grafana Alerting** (over ClickHouse), you can call those helpers directly without running a separate alert binary:
+
+```kql
+// ADX DRI alert query (deduplicate by TargetId, OriginalScopeId, OriginalSource, EpisodeId, ControllerVersion)
+ProdRecordedIncidentAlertsDuring("billing-prod", ago(5m), now())
+| project FirstRecordedObservation, TargetId, OriginalScopeId, OriginalSource, EpisodeId, ControllerVersion, Mechanism, VictimSummary, DeveloperAction
+```
+
+```sql
+-- ClickHouse DRI alert query (+ pair with ProdStatusNow for collector staleness)
+SELECT FirstRecordedObservation, TargetId, OriginalScopeId, OriginalSource, EpisodeId, ControllerVersion, Mechanism, DeveloperAction, 1 AS AlertValue
+FROM ProdRecordedIncidentAlertsDuring(resource = 'billing-prod', window_from = now64(9, 'UTC') - INTERVAL 5 MINUTE, window_until = now64(9, 'UTC'));
+```
+
+For the full list of automatic wait/DMV investigations, all 18 `*V1` warehouse tables, and the `ProdStatusNow` dead-collector query, see [24/7 SQL Root-Cause Investigations, Warehouse Tables, and DRI Alerts](/blog/automated-sql-root-cause-investigations-adx-clickhouse-schema/).
 
 <Callout title="Proximity to a deploy mark is context, never fake proof" tone="amber">
   <p>

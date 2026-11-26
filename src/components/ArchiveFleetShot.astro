@@ -1,0 +1,60 @@
+---
+export interface Props {
+  variant: "elastic-pool" | "multiengine";
+}
+
+const { variant } = Astro.props;
+
+const isPool = variant === "elastic-pool";
+const lightSrc = isPool
+  ? "/blog/images/archive-fleet-elastic-pool-light.webp"
+  : "/blog/images/archive-fleet-multiengine-light.webp";
+const darkSrc = isPool
+  ? "/blog/images/archive-fleet-elastic-pool-dark.webp"
+  : "/blog/images/archive-fleet-multiengine-dark.webp";
+const width = 1840;
+const height = isPool ? 1959 : 1662;
+const hint = isPool
+  ? "Estate Triage · Grouped by Elastic Pool / Instance (read-only ADX)"
+  : "Estate Triage · Azure SQL, PostgreSQL RDS, MySQL & SQL MI (read-only ADX)";
+const alt = isPool
+  ? "Culprit Web Archive Estate Triage dashboard grouped by Elastic Pool, Standalone databases, and Managed Instance over read-only Azure Data Explorer"
+  : "Culprit Web Archive Estate Triage dashboard showing multi-engine attention status across Azure SQL, PostgreSQL RDS, Aurora MySQL, and SQL Managed Instance";
+const caption = isPool
+  ? "culprit-archive-web rendering <Prefix>FleetSummary from Azure Data Explorer: toggling By Elastic Pool / Instance isolates tenant-analytics and billing-prod inside pool-saas-prod alongside PostgreSQL RDS, Aurora MySQL, and SQL Managed Instance targets."
+  : "culprit-archive-web serving zero-seat Estate Triage over ADX and ClickHouse: Azure SQL Elastic Pools, PostgreSQL RDS, Aurora MySQL, and SQL Managed Instance share one incident, finding, and collector-freshness view.";
+---
+
+<div class="blog-wide">
+  <figure class="blog-embed-card">
+    <div class="blog-embed-head">
+      <div class="blog-embed-meta">
+        <span class="blog-window-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="blog-embed-pill">culprit-archive-web</span>
+        <span class="blog-embed-hint">{hint}</span>
+      </div>
+      <span class="blog-embed-hint">0 DB drivers compiled</span>
+    </div>
+    <div class="blog-embed-body">
+      <img
+        class="blog-window-shot shot-light"
+        src={lightSrc}
+        width={width}
+        height={height}
+        loading="lazy"
+        decoding="async"
+        alt={alt}
+      />
+      <img
+        class="blog-window-shot shot-dark"
+        src={darkSrc}
+        width={width}
+        height={height}
+        loading="lazy"
+        decoding="async"
+        alt={alt}
+      />
+    </div>
+    <figcaption class="blog-embed-caption">{caption}</figcaption>
+  </figure>
+</div>

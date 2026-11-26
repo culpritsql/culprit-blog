@@ -13,7 +13,7 @@ relatedSlug: "after-azure-data-studio"
 
 import Callout from "../../components/Callout.astro";
 import KeyTakeaways from "../../components/KeyTakeaways.astro";
-import MssqlPlanDiffEmbed from "../../components/MssqlPlanDiffEmbed.astro";
+import PostgresMcpPlanDiffEmbed from "../../components/PostgresMcpPlanDiffEmbed.astro";
 import StatStrip from "../../components/StatStrip.astro";
 
 <KeyTakeaways
@@ -52,13 +52,13 @@ When you start `culprit mcp` in `EvidenceOnly` mode delegated to your read-only 
   </p>
 </Callout>
 
-## From archived Key Lookup to verified covering index
+## From archived Seq Scan to verified `CONCURRENTLY` index
 
-Here is what that workflow looks like on a real checkout slowdown. `fleet_attention` flags `shop-prod` with a high-impact finding (`key-lookup` accounting for 34% of database time). The captured SqlCommenter tag (`/* controller='orders#recent',file='src/orders/repo.ts:84' */`) points straight to the repository file.
+Here is what that workflow looks like on a real PostgreSQL audit-log slowdown. `fleet_attention` flags `audit-pg-prod` with a high-impact finding (`seq-scan` accounting for 38% of database time). The captured SqlCommenter tag (`/* controller='audit#recent',file='src/audit/repo.ts:84' */`) points straight to the repository file.
 
-Calling `warehouse_plan_insights` parses the archived `.sqlplan` and surfaces the `18,400` Key Lookups on `pk_orders`. Once the covering `INCLUDE (customer_id, total_cents, shipping_notes)` index is tested, the plan drops from `56,120` logical reads (`184 ms`) to `157` logical reads (`3 ms`):
+Calling `warehouse_plan_insights` parses the archived `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` artifact and shows `public.audit_events` scanning `2.4M` rows (`41,200` shared buffers, `246 ms`) to filter one tenant's key-rotation events. Once `CREATE INDEX CONCURRENTLY audit_events_org_action_created_idx ON public.audit_events (org_id, action, created_at DESC)` is verified via HypoPG and `culprit lint-sql`, execution drops to a `6`-buffer backward `Index Scan` (`1.4 ms`):
 
-<MssqlPlanDiffEmbed />
+<PostgresMcpPlanDiffEmbed />
 
 ## The mandatory gate: `culprit lint-sql` in CI
 

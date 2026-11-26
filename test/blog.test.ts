@@ -9,6 +9,7 @@ const distDir = path.join(root, "dist");
 
 const EXPECTED_SLUGS = [
   "after-azure-data-studio",
+  "automated-sql-root-cause-investigations-adx-clickhouse-schema",
   "azure-data-explorer-vs-clickhouse-database-telemetry",
   "azure-sql-database-watcher-retirement",
   "database-fleet-dashboard-adx-without-grafana-enterprise",
@@ -70,7 +71,7 @@ function readPngDimensions(pngPath: string): { width: number; height: number } {
 }
 
 describe("Culprit SQL Blog content, prose quality, and textbook SEO", () => {
-  test("contains all 10 expected posts with SERP-sized SEO frontmatter, valid internal links, and zero AI buzzwords", () => {
+  test("contains all 11 expected posts with SERP-sized SEO frontmatter, valid internal links, and zero AI buzzwords", () => {
     const mdxFiles = fs.readdirSync(contentDir).filter((f) => f.endsWith(".mdx")).sort();
     expect(mdxFiles).toEqual(EXPECTED_SLUGS.map((s) => `${s}.mdx`));
 
@@ -199,12 +200,13 @@ describe("Culprit SQL Blog content, prose quality, and textbook SEO", () => {
 
           // Verify clean Markdown export for llms.txt (zero unrendered MDX components and absolute /blog/ links)
           const md = fs.readFileSync(r.mdFile, "utf8");
-          expect(md).not.toMatch(/<(?:KeyTakeaways|Callout|StatStrip|Timeline|WorkflowCards|Mssql\w+Embed)\b/);
+          expect(md).not.toMatch(/<(?:KeyTakeaways|Callout|StatStrip|Timeline|WorkflowCards|ArchiveFleetShot|(?:Mssql|Postgres)\w+Embed)\b/);
           expect(md).not.toContain("](/blog/");
         }
 
         if (
           r.slug === "microsoft-database-hub-vs-culprit-adx" ||
+          r.slug === "automated-sql-root-cause-investigations-adx-clickhouse-schema" ||
           r.slug === "sql-server-containers-apple-silicon-mac-rosetta-arm64"
         ) {
           expect(types).toContain("FAQPage");
@@ -228,6 +230,20 @@ describe("Culprit SQL Blog content, prose quality, and textbook SEO", () => {
           expect(html).toContain("https://explain.culpritsql.com/deadlock#s=z1.");
         }
       }
+      // Ensure no two posts share an identical live plan/deadlock #s=z1. payload
+      const seenExplainUrls = new Map<string, string>();
+      for (const slug of EXPECTED_SLUGS) {
+        const html = fs.readFileSync(path.join(distDir, `${slug}/index.html`), "utf8");
+        for (const m of html.matchAll(/https:\/\/explain\.culpritsql\.com\/(?:compare|deadlock)#s=z1\.[A-Za-z0-9_-]+/g)) {
+          const url = m[0];
+          const prev = seenExplainUrls.get(url);
+          if (prev && prev !== slug) {
+            throw new Error(`Duplicate interactive Explain payload shared between ${prev} and ${slug}`);
+          }
+          seenExplainUrls.set(url, slug);
+        }
+      }
+
       const rssXml = fs.readFileSync(path.join(distDir, "rss.xml"), "utf8");
       expect(rssXml).toContain("<link>https://culpritsql.com/blog/</link>");
       for (const slug of EXPECTED_SLUGS) {

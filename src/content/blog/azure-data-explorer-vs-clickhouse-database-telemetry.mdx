@@ -26,7 +26,7 @@ import StatStrip from "../../components/StatStrip.astro";
 
 Most comparisons of **Azure Data Explorer (ADX / Kusto)** and **ClickHouse** are written by vendors selling one of the two.
 
-When we built the warehouse layer for [Culprit SQL](https://culpritsql.com) (covered in [Microsoft Database Hub vs. Culprit + ADX](/blog/microsoft-database-hub-vs-culprit-adx/)), we refused to pick one cloud. We wrote two first-class Rust adapters - `culprit-store-adx` and `culprit-store-clickhouse` - against the exact same verified telemetry and Gold diagnosis contracts (`CulpritIncidentsV1`, `CulpritFindingsV1`, `CulpritChangesV1`).
+When we built the warehouse layer for [Culprit SQL](https://culpritsql.com) (covered in [Microsoft Database Hub vs. Culprit + ADX](/blog/microsoft-database-hub-vs-culprit-adx/)), we refused to pick one cloud. We wrote two first-class Rust adapters - `culprit-store-adx` and `culprit-store-clickhouse` - against the exact same [18-table `*V1` telemetry and Gold diagnosis contract](/blog/automated-sql-root-cause-investigations-adx-clickhouse-schema/) (`CulpritIncidentsV1`, `CulpritFindingsV1`, `CulpritChangesV1`).
 
 Building both adapters side by side exposed every practical quirk in how Kusto and ClickHouse handle 64-bit counters, nullable fields, deduplication, and monthly cloud bills.
 

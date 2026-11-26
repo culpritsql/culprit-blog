@@ -1,0 +1,22 @@
+---
+import { getPostgresMcpPlanDiffDemo } from "../lib/demoArtifacts";
+import { PlanDiffIsland } from "./PlanDiffIsland";
+
+const { a, b, diff, nameA, nameB, explainUrl } = await getPostgresMcpPlanDiffDemo();
+const caption =
+  "Live @culpritsql/plan-viewer PostgreSQL EXPLAIN diff: scanning 2.4M rows of public.audit_events with top-N heapsort (246 ms, 41,200 shared buffers) drops to a backward Index Scan on audit_events_org_action_created_idx (1.4 ms, 6 shared buffers) after a lint-sql verified CREATE INDEX CONCURRENTLY migration.";
+---
+
+<div class="blog-wide">
+  <PlanDiffIsland
+    client:visible
+    a={a}
+    b={b}
+    diff={diff}
+    nameA={nameA}
+    nameB={nameB}
+    explainUrl={explainUrl}
+    caption={caption}
+    pillLabel="Live EXPLAIN JSON diff"
+  />
+</div>

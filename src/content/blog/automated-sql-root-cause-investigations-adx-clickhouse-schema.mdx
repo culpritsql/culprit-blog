@@ -1,0 +1,264 @@
+---
+title: "24/7 SQL Root-Cause Investigations, Warehouse Tables, and DRI Alerts"
+seoTitle: "Automated SQL Investigations, ADX/ClickHouse Tables and KQL"
+description: "A complete engineering reference for Culprit's unattended collector: every automatic root-cause investigation (deadlocks, TempDB, PAGELATCH_EX, THREADPOOL, memory grants, Hyperscale log rate, XID wraparound), all 18 ADX and ClickHouse V1 tables, and copy-paste DRI alert queries."
+seoDescription: "Every 24/7 SQL check (deadlocks, TempDB, PAGELATCH_EX, THREADPOOL), all 18 ADX and ClickHouse V1 tables, and DRI alert queries."
+pubDate: 2026-11-26
+author: "Cristian Pufu"
+readingMinutes: 10
+tags: ["SQL Server", "PostgreSQL", "ADX", "ClickHouse", "Alerting"]
+keywords: ["pagelatch_ex tempdb pfs gam sgam", "threadpool worker starvation sql server", "resource_semaphore memory grant wait", "hyperscale log_rate_governor", "azure monitor adx kql scheduled query alert", "clickhouse grafana sql alert", "postgresql replication slot xmin wraparound", "lck_m_sch_m blocking chain"]
+relatedSlug: "sql-blocking-deploy-regression-alerts-slack-teams-pagerduty"
+faq: [{"question": "How do I set up DRI alerts over CulpritIncidentsV1 in Azure Data Explorer or ClickHouse?", "answer": "Run culprit collect queries --config archive.json --name Prod to install namespace-bound helper functions and generate a paused Grafana alert pack. Point Azure Monitor Scheduled Query Rules (for ADX), Grafana Alerting (for ClickHouse), or culprit-notify at ProdRecordedIncidentAlertsDuring every 1 to 5 minutes, deduplicating by TargetId, OriginalScopeId, OriginalSource, EpisodeId, and ControllerVersion, plus a separate ProdStatusNow availability rule."}, {"question": "Will automatic PAGELATCH_EX, deadlock, or TempDB investigations slow down a busy production database?", "answer": "No. Unattended 24/7 recipes run under source-verified BuiltinSafety envelopes: 500-row caps, 1,000 ms statement timeouts, and OPTION (MAXDOP 1). Focused follow-ups run under resource cooldowns (for example, mssql.focused-page-wait inspects at most 1 contended page), while expensive full-cache sweeps or unindexed catalog scans remain disabled unless explicitly qualified."}, {"question": "How many tables does Culprit create in Azure Data Explorer or ClickHouse?", "answer": "culprit collect schema creates 18 append-only V1 tables: 13 raw evidence tables, 3 Gold diagnosis tables (CulpritIncidentsV1, CulpritFindingsV1, CulpritChangesV1), CulpritPublishedRangesV1 for atomic batch completion, and CulpritCollectorConnectionsV1 for collector connection health."}]
+---
+
+import Callout from "../../components/Callout.astro";
+import KeyTakeaways from "../../components/KeyTakeaways.astro";
+import StatStrip from "../../components/StatStrip.astro";
+
+<KeyTakeaways
+  label="TL;DR"
+  items={[
+    "<strong>Two-stage root-cause capture:</strong> fast 3-minute metadata baselines (<code>&lt;= 500</code> rows, <code>1,000 ms</code> timeout, <code>MAXDOP 1</code>) detect active contention and trigger bounded follow-ups before a transient stall disappears.",
+    "<strong>18 append-only <code>*V1</code> tables in ADX and ClickHouse:</strong> 13 raw evidence tables, 3 synthesized Gold tables (<code>CulpritIncidentsV1</code>, <code>CulpritFindingsV1</code>, <code>CulpritChangesV1</code>), an atomic publication fence, and collector connection telemetry.",
+    "<strong>Copy-paste DRI alert queries:</strong> <code>culprit collect queries</code> generates ready-to-run KQL and ClickHouse SQL helpers for Azure Monitor Scheduled Query Rules, Grafana Alerting, or <code>culprit-notify</code>."
+  ]}
+/>
+
+Most database monitoring tools give you an uncomfortable choice: collect lightweight aggregate counters that tell you CPU hit 92% without capturing *why*, or turn on heavy DMV and Extended Events scrapers that pile onto a struggling server right when `THREADPOOL` or latch contention hits.
+
+When we built the unattended collector for [Culprit SQL](https://culpritsql.com) (covered in [Microsoft Database Hub vs. Culprit + ADX](/blog/microsoft-database-hub-vs-culprit-adx/)), we wanted post-incident root-cause forensics without turning the collector itself into a production risk.
+
+Here is the complete technical reference for what the 24/7 collector investigates automatically, what lands in your Azure Data Explorer (ADX) or [ClickHouse](/blog/azure-data-explorer-vs-clickhouse-database-telemetry/) database, and the exact KQL and SQL queries to wire up on-call DRI alerts.
+
+## How two-stage unattended investigations protect production
+
+Running `sys.dm_db_page_info` across hundreds of waiting sessions or dumping `sys.dm_exec_cached_plans` every minute is a classic way to stall SQL Server. Culprit splits unattended collection into three strict layers:
+
+1. **Bounded metadata baselines (`BuiltinSafety`):** Every 3 to 5 minutes, the collector reads lightweight session, wait, operational, and query-interval views with `OPTION (MAXDOP 1)`, a `500`-row cap, a `1,000 ms` statement timeout, and a `5 s` total phase ceiling. No SQL text blobs or lock-manager walks happen in the fast baseline.
+2. **Episode-pinned surgical follow-ups:** When a sealed baseline reveals an active stall (a blocking head, a hot `db:file:page` wait, worker starvation, or Hyperscale log throttling), the local diagnostic controller schedules a targeted follow-up against that specific generation and resource under shared cooldown budgets. For example, `mssql.focused-page-wait` inspects at most **one** contended page (`max_snapshot_rows = 1`).
+3. **Zero-query Rust synthesis:** Plan diffing, blocking-tree reduction, and [evidence-gated checks](/blog/why-database-monitors-cry-wolf-seven-evidence-rules/) run in Rust over local sealed files before warehouse upload, issuing **zero** extra queries to your database.
+
+<StatStrip
+  stats={[
+    { value: "1,000 ms", label: "Hard statement timeout and MAXDOP 1 across unattended baseline reads", tone: "green" },
+    { value: "18 *V1 tables", label: "Identical append-only contract across Azure Data Explorer and ClickHouse", tone: "amber" },
+    { value: "0 SQL rules", label: "All diagnosis runs in Rust before ingest; KQL and SQL only read sealed answers", tone: "default" }
+  ]}
+/>
+
+## Every automatic root-cause investigation (by wait type and symptom)
+
+Below is what Culprit's unattended collector detects and attributes out of the box under `MonitoringPolicy::Standard`, alongside the deeper opt-in probes that stay gated until you attach a benchmark receipt.
+
+### 1. Blocking chains and `LCK_M_SCH_M` metadata-lock sandwiches
+- **Signals & waits:** `LCK_M_X`, `LCK_M_U`, `LCK_M_IX`, `LCK_M_SCH_M` / `LCK_M_SCH_S` (SQL Server); `Lock:relation`, `Lock:transactionid`, `Lock:tuple` (PostgreSQL); `Waiting for table metadata lock` and InnoDB row locks (MySQL / MariaDB).
+- **What runs automatically:** `mssql.activity` + `mssql.blocking`, `postgres.activity` + `postgres.blocking` (built-in safety on PostgreSQL 18; metadata baseline on 12+), and `mysql.activity` + `mysql.blocking` + `mysql.metadata-lock-context`.
+- **What you get in `CulpritIncidentsV1`:** 40 victim sessions collapse into one root-cause episode naming the head blocker, whether it is `idle in transaction` holding an open snapshot, or a schema-modification DDL (`ALTER TABLE` / index build) wedged behind a long reader while blocking every incoming `SELECT`. If the head blocker's current SQL is not proven to be the statement that acquired the lock, Culprit labels it a *candidate* rather than inventing false blame.
+
+### 2. Deadlock cycles and victim vs. survivor attribution
+- **Signals:** Error `1205` / Extended Events `.xdl` graphs (Azure SQL & SQL Server), InnoDB `LATEST DETECTED DEADLOCK` (MySQL / MariaDB), and `deadlocks` operational deltas (PostgreSQL).
+- **What runs automatically:** `mssql.deadlock-history` (reading `sys.fn_xe_telemetry_blob_target_read_file` on Azure SQL Database), `mssql.system-health-deadlocks` (on SQL Server and Managed Instance), and `mysql.deadlock-history`.
+- **What you get:** Full deadlock cycle graphs archived in Blob/S3 by SHA-256 digest, plus structured incident rows showing both the killed victim and the surviving lock holder, locked index/key names (`PK_orders` vs `PK_inventory`), isolation levels, and redacted input buffers.
+
+### 3. Hot-page `PAGELATCH_EX` / `PAGEIOLATCH_*` and TempDB `PFS` / `GAM` / `SGAM` contention
+- **Signals & waits:** `PAGELATCH_EX`, `PAGELATCH_SH`, `PAGELATCH_UP`, `PAGEIOLATCH_SH`, `PAGEIOLATCH_EX` with `wait_resource` tokens (`db_id:file_id:page_id`).
+- **What runs automatically:** `mssql.page-wait-tasks`, `mssql.focused-page-wait` (`max_snapshot_rows = 1`), and `mssql.focused-shared-tempdb-page-wait` for `db_id = 2` TempDB pages.
+- **What you get:** Distinguishes classic sequential-key last-page insert hotspots (`IDENTITY` / `NEWID()` clustered index tail contention on a user table) from TempDB allocation bitmap contention (`PFS` page `1:8088`, `GAM` `1:2`, `SGAM` `1:3`, or `#temp` catalog metadata latch storms) without running broad `dm_db_page_info` sweeps across every session.
+
+### 4. TempDB version-store and internal object blowups
+- **Signals:** Rising `version_store_reserved_page_count`, `persistent_version_store` growth, or long-running open transactions blocking row-version cleanup.
+- **What runs:** `mssql.cleanup` and `mssql.operational` run automatically on baseline schedules to identify open transactions, ADR / PVS horizons, and `log_reuse_wait_desc`. When a native cleanup boundary stays pinned for **30 minutes or longer**, the diagnostic planner can schedule one bounded `mssql.task-space` follow-up (when cost-qualified for that target) to inspect `dm_db_task_space_usage` and `dm_db_session_space_usage`.
+
+### 5. Worker thread exhaustion (`THREADPOOL` and `SOS_SCHEDULER_YIELD`)
+- **Signals & waits:** `THREADPOOL` waits (new requests queued before getting a worker thread), high `runnable_tasks_count` per scheduler, and `SOS_SCHEDULER_YIELD`.
+- **What runs automatically:** `mssql.worker-starvation`, `mssql.shared-operational`, and `mssql.instance-wait-counters`.
+- **What you get:** Captures scheduler queue depth, active worker counts vs `max_workers_count`, blocking chains holding up parallel `CXPACKET` / `CXCONSUMER` threads, and high-DOP queries starving login acceptance.
+
+### 6. Memory-grant queues (`RESOURCE_SEMAPHORE`) and OOM errors
+- **Signals & waits:** `RESOURCE_SEMAPHORE`, `RESOURCE_SEMAPHORE_QUERY_COMPILE`, `CMEMTHREAD`, ring-buffer OOM events, and SQL errors `701`, `802`, or `8645`.
+- **What runs:** `mssql.memory-failures` and `mssql.operational` run automatically under `BuiltinSafety`; request-level grant inspection (`mssql.focused-request-memory` and `mssql.focused-compiler-admission`) can be enabled via qualification receipts when you want live grant-waiter snapshots.
+- **What you get:** Separates workspace memory-grant starvation (oversized `Sort` / `Hash Match` grants caused by bad row estimates) from buffer-pool pressure, memory clerk growth, or query compilation gateway throttling.
+
+### 7. Azure SQL Hyperscale `LOG_RATE_GOVERNOR` and Elastic Pool `RESOURCE_GOVERNOR`
+- **Signals & waits:** `LOG_RATE_GOVERNOR`, `HADR_THROTTLE_LOG_RATE_GOVERNOR`, `HADR_THROTTLE_LOG_RATE_MISMATCHED_SLO`, `POOL_LOG_RATE_GOVERNOR`, `RESOURCE_GOVERNOR`, and `INSTANCE_LOG_RATE_GOVERNOR`.
+- **What runs automatically:** `mssql.hyperscale-log-components`, `mssql.resource-history`, `mssql.pool-resource-history`, and `mssql.wait-counters`.
+- **What you get:** On Azure SQL Hyperscale, pinpoints whether write throttling comes from the log service, a lagging page server, or a compute replica. On Elastic Pools, [`culprit-archive-web`](/blog/database-fleet-dashboard-adx-without-grafana-enterprise/) groups sibling databases onto the shared pool so noisy-neighbor CPU or log bursts stand out immediately.
+
+### 8. Transaction log reuse, orphaned replication slots, and PostgreSQL `xmin` / XID wraparound
+- **Signals:** SQL Server `log_reuse_wait_desc` (`ACTIVE_TRANSACTION`, `REPLICATION`, `AVAILABILITY_REPLICA`, `LOG_BACKUP`); PostgreSQL `age(datfrozenxid)`, `mxid_age`, inactive logical replication slots retaining WAL, prepared transactions (`pg_prepared_xacts`), and autovacuum blockers.
+- **What runs automatically:** `mssql.operational` + `mssql.cleanup`, `postgres.operational` + `postgres.cleanup` + `postgres.replication`, and `mysql.operational` + `mysql.replication` + `mysql.cleanup`.
+- **What you get:** Actionable `high`-severity findings in `CulpritFindingsV1` well before disk full or PostgreSQL XID wraparound read-only shutdown, naming the exact slot, standby, or open transaction horizon holding back cleanup.
+
+### 9. Execution-plan regressions, TempDB spills, and `WAIT_ON_SYNC_STATISTICS_REFRESH`
+- **Signals:** Query Store plan switches (`CulpritChangesV1`), `SpillToTempDb` warnings, `PlanAffectingConvert` (`CONVERT_IMPLICIT`), forced nested-loop joins, `WAIT_ON_SYNC_STATISTICS_REFRESH` stalls, and `pg_stat_statements` buffer/latency jumps.
+- **What runs automatically:** `mssql.query-history` + `mssql.retained-plans` + `mssql.wait-counters` (database-scoped), `postgres.statement-counters` + `postgres.statement-definitions`, `mysql.statement-counters` + `mysql.runtime-distributions`, and `settings` checks across every engine.
+- **What you get:** Ranked `CulpritChangesV1` regressions with SHA-256 pointers to the sealed Before and After `.sqlplan` / `EXPLAIN` payloads in Blob/S3, plus `sync-stats-refresh` findings when synchronous `AUTO_UPDATE_STATISTICS` stalls foreground callers (`AUTO_UPDATE_STATISTICS_ASYNC` fix).
+
+<Callout title="What stays explicitly gated by default" tone="amber">
+  <p>
+    Broad multi-waiter page-header sweeps (<code>mssql.page-wait-targets</code>), full plan-cache scans (<code>mssql.plan-cache-summary</code>), PostgreSQL 16+ subtransaction SLRU probes (<code>postgres.transaction-metadata</code>), and unindexed 50,000-table catalog crawls remain <code>cost-unqualified</code> by default. Presence in the binary never enables an expensive DMV query automatically.
+  </p>
+</Callout>
+
+## All 18 `*V1` warehouse tables in ADX and ClickHouse
+
+Running `culprit collect schema --store adx` (or `--store clickhouse`) installs **18 append-only tables**: 13 raw evidence tables, 3 Gold diagnosis tables, 1 atomic publication fence, and 1 collector connection-control table. Large `.sqlplan` XML and `.xel` files stay in private Azure Blob Storage or S3 so columnstore compression stays fast.
+
+| Layer | Table Name(s) | What It Stores |
+| :--- | :--- | :--- |
+| **Gold Diagnoses (3)** | `CulpritIncidentsV1` | Causal root-cause episodes (`active`, `uncertain`, `resolved`), victim summary, head-blocker / culprit queries, candidates, mechanism, fix, and verification steps. |
+| | `CulpritFindingsV1` | Ranked health, query, index, wait, and configuration findings with severity (`high`, `medium`, `low`), impact share, and evidence references. |
+| | `CulpritChangesV1` | Query regressions, plan switches, and setting changes across windows, enriched with `culprit mark` deployment proximity. |
+| **Activity, Waits & Deadlocks (4)** | `CulpritActivityV1` | Point-in-time session/request metadata, transaction state, wait resources (`db:file:page`), and native blocker edges. |
+| | `CulpritDeadlocksV1` | Native deadlock timestamps, graph hashes, victim/holder metadata, and Blob/S3 `.xdl` recovery pointers. |
+| | `CulpritResourceSamplesV1` | Database, Elastic Pool, and Managed Instance CPU, data I/O, log write, memory, and worker utilization samples (with `describes_subject` scope guards). |
+| | `CulpritWaitCountersV1` | Cumulative wait counters (`PAGELATCH_*`, `RESOURCE_SEMAPHORE`, `LOG_RATE_GOVERNOR`, `WAIT_ON_SYNC_STATISTICS_REFRESH`) with explicit reset epochs. |
+| **Queries & Plans (4)** | `CulpritQueryRuntimeV1` | Query Store / digest interval executions, duration, CPU, logical/physical reads, memory grants, spills, and aborts with explicit units. |
+| | `CulpritQueryWaitsV1` | Per-query interval wait categories and exact wait totals. |
+| | `CulpritQueryDefinitionsV1` | Versioned, literal-redacted SQL text previews, hashes, and SqlCommenter tags (`controller`, `file:line`). |
+| | `CulpritPlanDefinitionsV1` | Versioned plan metadata, compile metrics, and SHA-256 references to full `.sqlplan` / `EXPLAIN` blobs in recovery storage. |
+| **Operational, Config & Schema (5)** | `CulpritOperationalV1` | Typed operational facts: `log_reuse_wait_desc`, XID/MultiXact age, memory clerks, OOM events, Hyperscale log components, `statement-counters`, and diagnostic step revisions. |
+| | `CulpritReplicationV1` | Availability Group / read-replica lag, WAL senders, and PostgreSQL physical/logical replication slot retention horizons. |
+| | `CulpritSettingsV1` | Effective database/server configuration values, units, pending-restart flags, and default provenance (`NULL` preserved when unmeasured). |
+| | `CulpritTuningV1` | Automatic tuning state, forced-plan flags, and engine missing-index group metadata. |
+| | `CulpritObjectsV1` | Table, index, partition, sequence, foreign-key, and statistics catalog snapshots with per-source coverage state. |
+| **Publication & Control (2)** | `CulpritPublishedRangesV1` | Atomic capture completion fence: row counts, reference integrity (`ReferencesComplete`), source-query budgets, and digest proofs. |
+| | `CulpritCollectorConnectionsV1` | Culprit's own connection/authentication attempt outcomes, monotonic phase durations, and permission failure codes (zero secrets or SQL payloads). |
+
+<Callout title="Never point DRI alerts at raw landing tables without publication guards" tone="blue">
+  <p>
+    Queued ingestion in ADX or retries after a network blip can leave partial or duplicate physical rows in raw landing tables before a capture settles. Always query through the generated <code>*During</code> / <code>*Rows</code> functions (which enforce <code>CulpritPublishedRangesV1</code> membership and select the canonical head revision), never raw <code>CulpritIncidentsV1 | where ...</code> table scans.
+  </p>
+</Callout>
+
+## Setting up DRI alerts in Azure Monitor (ADX) and Grafana (ClickHouse)
+
+You have two ways to page on-call engineers from these tables:
+
+1. **Zero-dependency binary:** Run [`culprit collect notify`](/blog/sql-blocking-deploy-regression-alerts-slack-teams-pagerduty/) to send deduplicated, auto-resolving PagerDuty, Slack, Teams, Webhook, or GitHub Issue alerts with zero external infrastructure.
+2. **Your existing observability stack:** Wire **Azure Monitor Scheduled Query Rules** (against ADX) or **Grafana Alerting** (against ClickHouse or ADX) directly over Culprit's generated helper functions.
+
+### Step 1: Generate the namespace-bound helpers and paused Grafana pack
+
+Run `culprit collect queries` once against your read-only archive config using your deployed collector's rules and analyzer version:
+
+```sh
+culprit collect queries --config archive.json --name Prod \
+  --history-from 2026-11-01T00:00:00Z \
+  --rules-version "$CULPRIT_RULES_VERSION" \
+  --analyzer-version "$CULPRIT_ANALYZER_VERSION" \
+  --analyzer-revision "$CULPRIT_ANALYZER_REVISION" \
+  --format json > operator-pack.json
+
+# 1. Extract the KQL (ADX) or SQL (ClickHouse) helper functions/views to apply to your warehouse:
+jq -r '.script' operator-pack.json > query-helpers.txt
+
+# 2. Optional: extract ready-to-import Grafana dashboard + paused alert rules:
+jq '.operator.dashboard' operator-pack.json > culprit-dashboard.json
+jq '.operator.alerts' operator-pack.json > culprit-alerts.paused.json
+```
+
+Apply `query-helpers.txt` to your ADX or ClickHouse database. Because the namespace view discovers resources dynamically, adding new databases via [AKS `sync-inventory`](/blog/monitor-azure-sql-postgres-fleet-aks-adx-helm/) never requires regenerating your alert functions.
+
+If you run ADX with queued ingestion and want sub-minute DRI alert latency instead of Kusto's default 5-minute batching window, lower the batching policy on the four Gold and publication tables:
+
+```kql
+.alter-merge tables (CulpritIncidentsV1, CulpritFindingsV1, CulpritChangesV1, CulpritPublishedRangesV1)
+policy ingestionbatching '{"MaximumBatchingTimeSpan":"00:00:30"}'
+```
+
+### Step 2: DRI Page Rule 1 - New Root-Cause Incidents
+
+`ProdRecordedIncidentAlertsDuring` (and `ProdNewIncidents`) joins `revision 1`'s collector timestamp (`FirstRecordedObservation`) to the latest canonical episode head. That means:
+- Resolved or uncertain episodes stay suppressed automatically.
+- Later follow-up revisions (for example, when `mssql.focused-page-wait` enriches an active incident with the exact index name 10 seconds later) update the diagnosis **without** creating a second alert identity.
+- Replaying or backfilling old historical captures keeps their original `FirstRecordedObservation` timestamp so historical backfills never page the DRI at 3 AM.
+
+**ADX (Azure Monitor Scheduled Query Rule, evaluated every 1 minute over a 5-minute window):**
+
+```kql
+ProdRecordedIncidentAlertsDuring("orders-prod", ago(5m), now())
+| project
+    FirstRecordedObservation,
+    Resource = "orders-prod",
+    TargetId,
+    OriginalScopeId,
+    OriginalSource,
+    EpisodeId,
+    ControllerVersion,
+    Mechanism,
+    VictimSummary,
+    DeveloperAction
+```
+
+**ClickHouse SQL (Grafana tabular alert rule, evaluated every 1 minute):**
+
+```sql
+SELECT
+    FirstRecordedObservation,
+    TargetId,
+    OriginalScopeId,
+    OriginalSource,
+    EpisodeId,
+    ControllerVersion,
+    Mechanism,
+    VictimSummary,
+    DeveloperAction,
+    1 AS AlertValue
+FROM ProdRecordedIncidentAlertsDuring(
+    resource = 'orders-prod',
+    window_from = now64(9, 'UTC') - INTERVAL 5 MINUTE,
+    window_until = now64(9, 'UTC')
+);
+```
+
+**Critical DRI deduplication rule:** Configure your alert router (Azure Monitor dimensions, Alertmanager `group_by`, or PagerDuty `dedup_key`) on the exact five-tuple `(TargetId, OriginalScopeId, OriginalSource, EpisodeId, ControllerVersion)`. Never include `AnalysisId`, `Revision`, or `InterpretationRecordedAt` in the alert key, or routine incident updates and rule upgrades will re-page on-call.
+
+### Step 3: Release Channel Rule 2 - Plan Flips and Deploy Regressions
+
+Route plan regressions (`ProdChangesDuring`) to `#eng-releases` in Slack or Teams rather than waking up the 3 AM pager, unless paired with an active incident:
+
+```kql
+ProdChangesDuring("orders-prod", ago(15m), now())
+| where ChangeKind == "query-regression"
+```
+
+```sql
+SELECT *
+FROM ProdChangesDuring(
+    resource = 'orders-prod',
+    window_from = now64(9, 'UTC') - INTERVAL 15 MINUTE,
+    window_until = now64(9, 'UTC')
+)
+WHERE ChangeKind = 'query-regression';
+```
+
+### Step 4: Platform Ops Rule 3 - Collector Staleness and Revoked Permissions
+
+An empty result from `ProdRecordedIncidentAlertsDuring` means *"no new incident was recorded"* - it **never** proves the collector is alive or still has `VIEW DATABASE PERFORMANCE STATE`. Always run a separate availability alert over `ProdStatusNow`:
+
+**ADX:**
+
+```kql
+ProdStatusNow("orders-prod", 30m)
+| where State != "observed" or not(InputReadComplete) or array_length(ContextIssues) > 0
+```
+
+**ClickHouse SQL:**
+
+```sql
+SELECT
+    State,
+    InputReadComplete,
+    ContextIssues,
+    1 AS AlertValue
+FROM ProdStatusNow(resource = 'orders-prod', max_age_seconds = 1800)
+WHERE State != 'observed'
+   OR NOT InputReadComplete
+   OR length(JSONExtractArrayRaw(ContextIssues)) > 0;
+```
+
+`ProdStatusNow` checks the original source database acquisition clock (never reanalysis time), so if a firewall rule drops collector traffic, an Entra role expires, or ADX ingestion stalls past 30 minutes, platform ops gets a clear availability alert instead of false green silence.
+
+From any DRI alert notification, link responders straight to [`culprit-archive-web`](/blog/database-fleet-dashboard-adx-without-grafana-enterprise/) to inspect the full incident timeline and `.sqlplan` diff in a browser, or let your [coding agent query the same archive via MCP](/blog/database-mcp-server-autonomous-verified-index-prs/) to draft a `lint-sql`-verified fix PR.

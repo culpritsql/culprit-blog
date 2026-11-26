@@ -10,6 +10,7 @@ export interface PlanDiffIslandProps {
   nameB: string;
   explainUrl: string;
   caption: string;
+  pillLabel?: string;
 }
 
 function readCurrentTheme(): "dark" | "light" {
@@ -19,7 +20,16 @@ function readCurrentTheme(): "dark" | "light" {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
-export function PlanDiffIsland({ a, b, diff, nameA, nameB, explainUrl, caption }: PlanDiffIslandProps) {
+export function PlanDiffIsland({
+  a,
+  b,
+  diff,
+  nameA,
+  nameB,
+  explainUrl,
+  caption,
+  pillLabel = "Live .sqlplan diff",
+}: PlanDiffIslandProps) {
   const [theme, setTheme] = useState<"dark" | "light">("dark");
 
   useEffect(() => {
@@ -39,7 +49,7 @@ export function PlanDiffIsland({ a, b, diff, nameA, nameB, explainUrl, caption }
     <figure className="blog-embed-card">
       <div className="blog-embed-head">
         <div className="blog-embed-meta">
-          <span className="blog-embed-pill">Live .sqlplan diff</span>
+          <span className="blog-embed-pill">{pillLabel}</span>
           <span className="blog-embed-hint">Click any operator or switch Diagram / Tree</span>
         </div>
         <a

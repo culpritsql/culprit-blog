@@ -12,6 +12,7 @@ relatedSlug: "database-fleet-dashboard-adx-without-grafana-enterprise"
 faq: [{"question": "Is Microsoft Database Hub really free?", "answer": "The basic estate inventory and default portal charts in Database Hub carry no direct Azure SQL surcharge. However, custom KQL retention in Eventhouse, Data Activator alerting, Copilot / Database Agents, and custom Power BI reports consume paid Microsoft Fabric Capacity Units (starting around $263/month PAYG for F2), and sharing custom Fabric dashboards below F64 (~$8,400/month PAYG) requires Power BI Pro licenses per viewer."}, {"question": "What replaces Azure SQL Database Watcher after April 30, 2027?", "answer": "Microsoft's first-party replacement is Database Hub in Microsoft Fabric. Teams who want to keep database telemetry inside their own Azure Data Explorer (ADX) or ClickHouse cluster across Azure SQL, PostgreSQL, MySQL, and self-managed SQL Server can run Culprit's open-source collector instead."}, {"question": "Does Culprit require installing agents on database servers?", "answer": "No. Culprit connects over standard read-only database protocols from a single container or Kubernetes pod in your VNet, enforcing strict query, row, byte, and 1-second statement timeout caps so monitoring never piles onto a production slowdown."}]
 ---
 
+import ArchiveFleetShot from "../../components/ArchiveFleetShot.astro";
 import Callout from "../../components/Callout.astro";
 import KeyTakeaways from "../../components/KeyTakeaways.astro";
 import MssqlRegressionDiffEmbed from "../../components/MssqlRegressionDiffEmbed.astro";
@@ -56,8 +57,10 @@ The cost structure shifts as soon as on-call engineers try to wire it into real 
 | **Viewer & seat licensing** | Power BI Pro below F64 (`~$8,400/mo`) | **$0** ([`culprit-archive-web`](/blog/database-fleet-dashboard-adx-without-grafana-enterprise/) + MIT desktop & CLI) |
 | **Alerting engine** | Fabric Data Activator (consumes CUs) | **$0** built-in [`culprit-notify`](/blog/sql-blocking-deploy-regression-alerts-slack-teams-pagerduty/) (Slack, Teams, PagerDuty, Webhooks, GitHub) |
 | **Execution plan depth** | Aggregated Query Store metrics in portal | Full `.sqlplan` & `EXPLAIN` recovery, 32 plan-insight rules, synchronized Before/After plan diff |
-| **Blocking & deadlocks** | Wait counters & basic session lists | Causal head-blocker chains, `.xel` / ring-buffer deadlock graphs, page-latch & TempDB attribution |
+| **Blocking & deadlocks** | Wait counters & basic session lists | Causal head-blocker chains, `.xel` / ring-buffer deadlock graphs, page-latch & TempDB attribution ([full investigation matrix](/blog/automated-sql-root-cause-investigations-adx-clickhouse-schema/)) |
 | **AI & coding agents** | Portal-only Copilot chat (consumes CUs) | Local/CI [MCP server](/blog/database-mcp-server-autonomous-verified-index-prs/) (`warehouse_plan_compare`) + `lint-sql` PR gate |
+
+<ArchiveFleetShot variant="multiengine" />
 
 ## Monthly TCO for a 40-database production fleet (25 engineers)
 
@@ -109,5 +112,6 @@ If you are planning your move before Database Watcher's April 30, 2027 cutoff, p
 
 - **Deploying on Kubernetes:** [Auto-discover 100+ Azure SQL & Postgres databases with AKS, Workload Identity, and Helm](/blog/monitor-azure-sql-postgres-fleet-aks-adx-helm/)
 - **Replacing Grafana Enterprise:** [Zero-seat Fleet Triage dashboards and plan diffs on ADX](/blog/database-fleet-dashboard-adx-without-grafana-enterprise/)
+- **Full investigation & schema reference:** [Every 24/7 SQL check, all 18 ADX/ClickHouse `*V1` tables, and copy-paste DRI alert queries](/blog/automated-sql-root-cause-investigations-adx-clickhouse-schema/)
 - **Cutting on-call noise:** [Alerting on head blockers and deploy regressions in Slack, Teams, and PagerDuty](/blog/sql-blocking-deploy-regression-alerts-slack-teams-pagerduty/)
 - **Coding agents & CI:** [Pairing archived ADX plans with `culprit lint-sql` to open verified index PRs](/blog/database-mcp-server-autonomous-verified-index-prs/)

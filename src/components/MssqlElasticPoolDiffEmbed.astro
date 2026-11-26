@@ -1,0 +1,21 @@
+---
+import { getMssqlElasticPoolDiffDemo } from "../lib/demoArtifacts";
+import { PlanDiffIsland } from "./PlanDiffIsland";
+
+const { a, b, diff, nameA, nameB, explainUrl } = await getMssqlElasticPoolDiffDemo();
+const caption =
+  "Live @culpritsql/plan-viewer diff: an unindexed usage rollup on usage.daily_api_events fanned out to DOP=4 (342 ms elapsed, 1,180 ms CPU across 4 threads, 148,200 logical reads), starving sibling databases in pool-saas-prod. Adding ix_daily_api_events_billable_bucket switches to a single-threaded Stream Aggregate + Index Seek (6 ms CPU, 38 logical reads).";
+---
+
+<div class="blog-wide">
+  <PlanDiffIsland
+    client:visible
+    a={a}
+    b={b}
+    diff={diff}
+    nameA={nameA}
+    nameB={nameB}
+    explainUrl={explainUrl}
+    caption={caption}
+  />
+</div>

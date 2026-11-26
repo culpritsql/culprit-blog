@@ -162,7 +162,7 @@ li {
 }
 
 .wrap {
-  width: min(1280px, 100% - 48px);
+  width: min(1180px, 100% - 48px);
   margin-inline: auto;
 }
 
@@ -172,7 +172,7 @@ li {
 }
 
 .article-wrap {
-  width: min(1280px, 100% - 48px);
+  width: min(1180px, 100% - 48px);
   margin-inline: auto;
 }
 
@@ -711,9 +711,8 @@ li {
 /* 2-Column Editorial Grid + Sticky TOC Rail */
 .article-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1050px) 190px;
-  justify-content: space-between;
-  gap: 40px;
+  grid-template-columns: minmax(0, 1fr) 212px;
+  gap: 48px;
   padding-top: 38px;
   padding-bottom: 84px;
 }
@@ -800,18 +799,24 @@ li {
 }
 
 /* Prose Typography & Scannable Rhythm */
-.article-prose > :not(.blog-wide),
+.article-prose > p,
+.article-prose > ul,
+.article-prose > ol,
+.article-prose > blockquote {
+  max-width: 840px;
+}
+
+.article-prose > .blog-wide,
+.article-prose > table,
+.article-prose > .code-frame,
+.article-prose > .ed-takeaways,
+.article-prose > .ed-callout,
+.article-prose > .ed-stat-strip,
+.article-prose > .ed-workflow-grid,
+.article-prose > .ed-timeline,
+.article-prose > .article-faq,
 .article-foot-box,
 .next-post-card {
-  max-width: 720px;
-}
-
-.article-prose > .ed-stat-strip,
-.article-prose > .ed-workflow-grid {
-  max-width: 860px;
-}
-
-.article-prose > .blog-wide {
   max-width: none;
   width: 100%;
 }
@@ -1487,6 +1492,10 @@ html[data-theme="dark"] .ed-stat-box.amber strong {
   .ed-stat-strip,
   .ed-workflow-grid {
     grid-template-columns: 1fr;
+  }
+  .article-prose table {
+    display: block;
+    overflow-x: auto;
   }
   .post-card {
     padding: 20px;

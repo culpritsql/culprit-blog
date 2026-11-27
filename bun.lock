@@ -9,7 +9,7 @@
         "@astrojs/react": "^4.2.4",
         "@astrojs/rss": "^4.0.11",
         "@culpritsql/plan-viewer": "^0.6.0",
-        "@culpritsql/plans": "^0.6.5",
+        "@culpritsql/plans": "^0.6.6",
         "astro": "^5.7.10",
         "lucide-react": "^1.16.0",
         "react": "^19.2.0",
@@ -92,7 +92,7 @@
 
     "@culpritsql/plan-viewer": ["@culpritsql/plan-viewer@0.6.0", "", { "dependencies": { "lucide-react": "1.68.0" }, "peerDependencies": { "react": "^18.0.0 || ^19.0.0" } }, "sha512-gqy6/0iGLFJ2a5jp9iqWk/W0mnm6afJTx2G8Wml4aFGG+w9sDnPMn2x0RfOW1sGkwfD2bEFaosmrAUx+EvxClQ=="],
 
-    "@culpritsql/plans": ["@culpritsql/plans@0.6.5", "", {}, "sha512-rylwnpb4ApavJmcOoLDz/KpP3DsSCZZ17w/Oj9762OUPNzCYzz8W7b9T/7k2PZFkKJwuY3KzahuQ1Qhw4qMOmw=="],
+    "@culpritsql/plans": ["@culpritsql/plans@0.6.6", "", {}, "sha512-tt6u56EVANfcqD9/Y9tfWLW7otMsItFs8vLzQe+ZdYuu0xBo59f8mj19HKStJUeXmERvnvCnmBvXjYuxOzb0Wg=="],
 
     "@emmetio/abbreviation": ["@emmetio/abbreviation@2.3.3", "", { "dependencies": { "@emmetio/scanner": "^1.0.4" } }, "sha512-mgv58UrU3rh4YgbE/TzgLQwJ3pFsHHhCLqY20aJq+9comytTXUDNGG/SMtSeMJdkpxgXSXunBGLD8Boka3JyVA=="],
 

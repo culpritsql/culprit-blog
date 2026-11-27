@@ -1,0 +1,123 @@
+---
+title: "PostgreSQL SubtransSLRU Cliffs from Nested Savepoints"
+seoTitle: "PostgreSQL SubtransSLRU & Savepoint Stalls on RDS"
+description: "Everything looks calm at 25% CPU until one batch worker opens 65+ savepoints alongside a long transaction and freezes every reader on SubtransSLRU. Here is the exact PGPROC mechanism, how to spot it in pg_stat_activity, and how to fix the application loop."
+seoDescription: "Why nested ORM savepoints overflow PGPROC's 64-entry subxid cache on PostgreSQL and RDS, triggering SubtransSLRU waits, and how to fix them."
+pubDate: 2026-11-27
+author: "Culprit Team"
+readingMinutes: 6
+tags: ["PostgreSQL", "AWS RDS", "Execution Plans", "Telemetry"]
+keywords: ["postgresql subtransslru", "postgres subtransaction performance cliff", "pgproc subxids 64 savepoints", "rds postgres subtranscontrol lock", "django atomic savepoint postgres stall", "rails nested transaction subtrans"]
+relatedSlug: "postgres-zero-downtime-migrations-lock-queue-ci"
+faq: [{"question": "Why is 64 subtransactions the magic cliff in PostgreSQL?", "answer": "Each backend's PGPROC shared-memory struct caches up to 64 subtransaction XIDs inline (PGPROC_MAX_CACHED_SUBXIDS = 64). Once any active transaction exceeds 64 open or committed subtransactions, its PGPROC entry is marked overflowed, forcing concurrent backends checking MVCC tuple visibility to resolve parent XIDs through the shared pg_subtrans SLRU pages and SubtransControlLock."}, {"question": "Do ordinary SELECT queries generate subtransactions?", "answer": "No, plain SELECT statements do not allocate XIDs or subtransactions. However, SELECT queries pay the penalty: whenever an Index Scan or Seq Scan visits a recently modified heap tuple whose xmin belongs to an overflowed backend within the active snapshot horizon, the reader must walk pg_subtrans under lightweight locks to check visibility."}]
+---
+
+import Callout from "../../components/Callout.astro";
+import KeyTakeaways from "../../components/KeyTakeaways.astro";
+import PostgresSubtransDiffEmbed from "../../components/PostgresSubtransDiffEmbed.astro";
+import StatStrip from "../../components/StatStrip.astro";
+
+<KeyTakeaways
+  label="TL;DR"
+  items={[
+    "<strong>64 subtransactions per backend is a hard fast-path boundary:</strong> past <code>PGPROC_MAX_CACHED_SUBXIDS = 64</code>, concurrent readers fall off shared-memory arrays onto <code>pg_subtrans</code> SLRU buffer locks.",
+    "<strong>Two ingredients combine to freeze production:</strong> a writer issuing <code>SAVEPOINT</code> inside a loop (Django <code>transaction.atomic()</code>, Rails <code>requires_new: true</code>, PL/pgSQL <code>EXCEPTION</code> blocks) plus one long-running snapshot holding back <code>xmin</code>.",
+    "<strong>Replace savepoint retry loops with set-based upserts:</strong> <code>INSERT ... ON CONFLICT DO NOTHING / DO UPDATE</code> achieves row-level conflict handling with zero subtransaction XIDs."
+  ]}
+/>
+
+One of the nastiest outages on Amazon RDS for PostgreSQL or Aurora PostgreSQL starts without a slow query deploy or a traffic spike. Average CPU sits at 25% all week, then jumps to 98% in thirty seconds while thousands of fast primary-key and index lookups stall on `LWLock:SubtransSLRU` (or `SubtransControlLock` on older versions).
+
+Killing the slowest `SELECT` queries does nothing, because those `SELECT` queries are victims.
+
+## Why 65 savepoints change how every reader checks MVCC visibility
+
+Every `SAVEPOINT` (and every `BEGIN ... EXCEPTION WHEN ... END` block in PL/pgSQL) allocates a child transaction ID (`subxid`) when it modifies state. To keep MVCC snapshot checks fast, PostgreSQL stores up to **64** subtransaction XIDs directly inside each backend's `PGPROC` structure in shared memory (`PGPROC_MAX_CACHED_SUBXIDS`).
+
+As long as every active session stays at or below 64 subtransactions, `XidInMVCCSnapshot()` scans those small in-memory arrays without touching `pg_subtrans` pages.
+
+The cliff arrives when two conditions overlap:
+
+1. **At least one backend overflows 64 subtransactions** inside a single parent transaction (setting `subxids.overflowed = true` in `ProcArray`).
+2. **A long-running transaction or hot-standby feedback pin holds the global `xmin` horizon back** (for example, an analytics export, an `idle in transaction` session, or `hot_standby_feedback = on` with a slow replica query).
+
+<StatStrip
+  stats={[
+    { value: "64 subxids", label: "Inline PGPROC fast-path ceiling per backend before ProcArray marks overflow", tone: "amber" },
+    { value: "LWLock stalls", label: "Readers serialize on SubtransSLRU / SubtransBuffer when resolving parent XIDs", tone: "coral" },
+    { value: "0 subxids", label: "Subtransactions allocated by INSERT ... ON CONFLICT DO UPDATE", tone: "green" }
+  ]}
+/>
+
+Once `ProcArray` contains an overflowed snapshot and `TransactionIdPrecedes(xid, TransactionXmin)` is false for newly written tuples, **every concurrent reader** inspecting those tuples has to look up their top-level parent XID in `pg_subtrans` SLRU buffers. Under 200 concurrent connections, cache lines bounce across cores and SLRU page replacements serialize readers behind `SubtransSLRU`.
+
+## Catching both halves of the incident in SQL
+
+During a live stall on PostgreSQL or AWS RDS, run one read-only diagnostic query against `pg_stat_activity` to separate the **wait victims** from the **horizon pin** and **savepoint writer**:
+
+```sql
+/* culprit */
+SELECT pid,
+       usename,
+       application_name,
+       state,
+       wait_event_type,
+       wait_event,
+       age(backend_xmin) AS xmin_age_xids,
+       now() - xact_start AS xact_age,
+       left(query, 120) AS current_sql
+FROM pg_stat_activity
+WHERE pid <> pg_backend_pid()
+  AND (xact_start IS NOT NULL OR wait_event IS NOT NULL)
+ORDER BY coalesce(age(backend_xmin), age(backend_xid), 0) DESC,
+         xact_start ASC NULLS LAST
+LIMIT 25;
+```
+
+Look at two distinct rows in that output:
+
+- **The horizon holder** sits at the top with a large `xact_age` or `xmin_age_xids` (often `state = 'idle in transaction'` or a 20-minute reporting `SELECT`).
+- **The victim herd** sits stacked on `wait_event_type = 'LWLock'` and `wait_event IN ('SubtransSLRU', 'SubtransBuffer', 'SubtransControlLock', 'MultiXactOffsetSLRU')`.
+
+<Callout title="Why Index Only Scans suddenly do 38,000 Heap Fetches" tone="amber">
+  <p>
+    Long open snapshots also block <code>VACUUM</code> from marking modified pages all-visible in the visibility map. Even before <code>SubtransSLRU</code> saturates CPU, latency creeps up because <code>Index Only Scan</code> nodes must drop down to the heap on every recently touched row and run full MVCC visibility checks.
+  </p>
+</Callout>
+
+Here is what that degradation looks like in `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` on `public.payment_attempts` before and after removing the savepoint loop and clearing the pinned horizon:
+
+<PostgresSubtransDiffEmbed />
+
+Click into the `Index Only Scan` node above: the plan shape looks identical at first glance, yet **Before** executes `38,400` `Heap Fetches` (`38,400` buffer reads, `384.8 ms`), while **After** completes in `1.84 ms` with `Heap Fetches: 0` and `8` shared buffer hits.
+
+## Three code patterns that silently mint thousands of savepoints
+
+Developers almost never write raw `SAVEPOINT sp_42` in application code. Savepoint storms come from ORM helpers nested inside loops:
+
+1. **Django `with transaction.atomic():` inside a `for` loop** when an outer request or Celery task already opened `atomic()`. The outer block starts `BEGIN`; every inner iteration emits `SAVEPOINT` and `RELEASE SAVEPOINT`.
+2. **ActiveRecord `Model.transaction(requires_new: true)`** or Sequel `db.transaction(savepoint: true)` called per imported CSV row to catch `RecordNotUnique`.
+3. **PL/pgSQL `BEGIN ... EXCEPTION WHEN unique_violation THEN ... END;`** inside a `FOR` loop over thousands of items. Every entry into an `EXCEPTION` block allocates a subtransaction.
+
+## Fixing the writer and capping the blast radius
+
+Replace exception-driven savepoint loops with single-statement conflict handling:
+
+```sql
+-- Zero savepoints, zero subxids, one round-trip for 1,000 rows:
+INSERT INTO public.payment_attempts (merchant_id, idempotency_key, amount_cents, state)
+SELECT * FROM unnest($1::bigint[], $2::text[], $3::bigint[], $4::text[])
+ON CONFLICT (merchant_id, idempotency_key)
+DO UPDATE SET state = EXCLUDED.state,
+              updated_at = now()
+WHERE public.payment_attempts.state <> 'settled';
+```
+
+Then enforce two server-level guardrails (via RDS Parameter Group or `ALTER DATABASE`) so one forgotten transaction cannot pin the MVCC horizon for twenty minutes:
+
+```sql
+ALTER DATABASE payments SET idle_in_transaction_session_timeout = '30s';
+ALTER DATABASE payments SET statement_timeout = '60s'; -- override per reporting role if needed
+```
+
+In Culprit SQL Studio and [Culprit Fleet](https://fleet.culpritsql.com/), `SubtransSLRU` wait spikes, `idle in transaction` horizon pins, and `Index Only Scan` heap-fetch regressions correlate into one finding rather than paging on generic CPU. Pair this with [lock-safe PostgreSQL migration gates in CI](/blog/postgres-zero-downtime-migrations-lock-queue-ci/) so DDL locks never start a second queue on the same hot table.

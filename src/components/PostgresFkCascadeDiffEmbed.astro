@@ -1,0 +1,22 @@
+---
+import { getPostgresFkCascadeDiffDemo } from "../lib/demoArtifacts";
+import { PlanDiffIsland } from "./PlanDiffIsland";
+
+const { a, b, diff, nameA, nameB, explainUrl } = await getPostgresFkCascadeDiffDemo();
+const caption =
+  "Live @culpritsql/plan-viewer PostgreSQL EXPLAIN diff: deleting one parent workspace cascades into a 3.8M-row Seq Scan on webhook_deliveries (612.4 ms, 61,000 buffers) until rule MIG004 adds webhook_deliveries_workspace_id_idx CONCURRENTLY (0.48 ms, 1,275x faster).";
+---
+
+<div class="blog-wide">
+  <PlanDiffIsland
+    client:visible
+    a={a}
+    b={b}
+    diff={diff}
+    nameA={nameA}
+    nameB={nameB}
+    explainUrl={explainUrl}
+    caption={caption}
+    pillLabel="Live PostgreSQL EXPLAIN diff"
+  />
+</div>

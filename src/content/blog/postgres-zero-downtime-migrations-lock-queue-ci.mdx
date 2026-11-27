@@ -1,0 +1,155 @@
+---
+title: "Stopping Lock-Queue Pileups in PostgreSQL Migrations"
+seoTitle: "PostgreSQL Lock-Safe SQL Migrations in GitHub Actions"
+description: "A metadata-only ALTER TABLE takes 12 milliseconds on staging and still takes down production when it queues behind one 8-second query. Here is how PostgreSQL lock queues form and how to block unsafe DDL in GitHub Actions."
+seoDescription: "How a 300 ms ALTER TABLE blocks every read behind an ACCESS EXCLUSIVE lock queue in PostgreSQL, and how to gate unsafe DDL in GitHub Actions."
+pubDate: 2026-11-27
+author: "Culprit Team"
+readingMinutes: 7
+tags: ["PostgreSQL", "CI/CD", "Execution Plans", "Migrations"]
+keywords: ["postgresql zero downtime migrations", "postgres access exclusive lock queue", "create index concurrently github actions", "lint sql migrations sarif", "unindexed foreign key postgres delete", "postgres lock_timeout migration"]
+relatedSlug: "postgres-subtransaction-slru-savepoint-cliff"
+faq: [{"question": "Why does a fast metadata-only ALTER TABLE block SELECT queries in PostgreSQL?", "answer": "ALTER TABLE acquires ACCESS EXCLUSIVE, which conflicts with every lock mode including ACCESS SHARE (taken by plain SELECT). If a 10-second reporting SELECT is already running when ALTER TABLE arrives, ALTER TABLE waits in the lock queue, and PostgreSQL's fair lock queue forces every new 2 ms SELECT behind the waiting ALTER TABLE until the 10-second query finishes."}, {"question": "Does PostgreSQL automatically create an index on FOREIGN KEY columns?", "answer": "PostgreSQL indexes the referenced PRIMARY KEY or UNIQUE parent column automatically, not the referencing child column. Without an explicit index on the child foreign-key column, every DELETE or key UPDATE on the parent table runs a full Seq Scan across the child table while holding row locks."}]
+---
+
+import Callout from "../../components/Callout.astro";
+import KeyTakeaways from "../../components/KeyTakeaways.astro";
+import PostgresFkCascadeDiffEmbed from "../../components/PostgresFkCascadeDiffEmbed.astro";
+import StatStrip from "../../components/StatStrip.astro";
+
+<KeyTakeaways
+  label="TL;DR"
+  items={[
+    "<strong>Fast DDL is not lock-free DDL:</strong> a 10 ms <code>ALTER TABLE</code> waiting on one slow <code>SELECT</code> blocks every new <code>SELECT</code>, <code>INSERT</code>, and <code>UPDATE</code> behind its <code>ACCESS EXCLUSIVE</code> request.",
+    "<strong>Unindexed foreign keys hide until parent cleanup runs:</strong> deleting one parent row scans millions of child rows unless the referencing column has a B-tree index.",
+    "<strong>Gate pull requests statically and against snapshots:</strong> <code>culpritsql/culprit-ci</code> flags lock-amplifying DDL with inline GitHub SARIF annotations before merge."
+  ]}
+/>
+
+Almost every backend team learns PostgreSQL's lock-queue rule the hard way at least once.
+
+An engineer writes `ALTER TABLE orders ADD COLUMN retry_count integer;` in a migration, tests it against a staging copy with 500,000 rows, sees it finish in `9 ms` (no table rewrite in modern PostgreSQL), and merges the pull request.
+
+During deploy, production connection pools hit 100% saturation and health checks fail across every API pod.
+
+## The `ACCESS EXCLUSIVE` lock-queue sandwich
+
+The migration itself did not rewrite `orders`. What took down the API was **lock-queue fairness**.
+
+1. At `14:00:01`, an internal dashboard or background job starts a `SELECT` over `orders` (`ACCESS SHARE` lock) that takes `9 seconds`.
+2. At `14:00:02`, the deploy job runs `ALTER TABLE orders ADD COLUMN ...`, requesting `ACCESS EXCLUSIVE`. Because `ACCESS SHARE` is currently held by the dashboard query, `ALTER TABLE` enters the wait queue.
+3. At `14:00:02.005`, 400 API requests/second run `SELECT * FROM orders WHERE id = $1`. To prevent writer starvation, PostgreSQL queues every new `ACCESS SHARE` request **behind** the waiting `ACCESS EXCLUSIVE` DDL session.
+
+For the next eight seconds, zero reads or writes on `orders` return.
+
+<StatStrip
+  stats={[
+    { value: "SET lock_timeout", label: "Aborts the DDL attempt in 2s instead of queuing API traffic behind slow readers", tone: "green" },
+    { value: "NOT VALID", label: "Splits ADD CONSTRAINT into a fast catalog entry plus SHARE UPDATE EXCLUSIVE validation", tone: "amber" },
+    { value: "SARIF 2.1.0", label: "Inline GitHub PR annotations on MIG001..MIG006 via culpritsql/culprit-ci", tone: "default" }
+  ]}
+/>
+
+## Four rewrites that keep hot PostgreSQL tables online
+
+### 1. Always bound DDL wait time with `lock_timeout`
+
+Never let a migration wait indefinitely in the lock queue. Prefixing DDL with `SET LOCAL lock_timeout = '2s'` (or session `SET lock_timeout = '2s'`) fails the migration cleanly if a long reader is active so your deploy runner can retry seconds later without piling up application connections:
+
+```sql
+SET lock_timeout = '2s';
+ALTER TABLE public.orders ADD COLUMN retry_count integer;
+RESET lock_timeout;
+```
+
+### 2. Build and drop indexes `CONCURRENTLY` outside transaction blocks
+
+Standard `CREATE INDEX` takes a `SHARE` lock, blocking every `INSERT`, `UPDATE`, and `DELETE` for the entire index build. `CREATE INDEX CONCURRENTLY` uses `SHARE UPDATE EXCLUSIVE` over two table scans so reads and writes continue uninterrupted, provided your migration runner disables its automatic `BEGIN ... COMMIT` wrapper (`MIG002`):
+
+```sql
+-- disable_ddl_transaction! (Rails) / atomic = False (Django) / -- migrate:no-transaction
+CREATE INDEX CONCURRENTLY IF NOT EXISTS orders_customer_status_idx
+  ON public.orders (customer_id, status);
+```
+
+### 3. Add `FOREIGN KEY` and `CHECK` constraints in two phases (`NOT VALID`)
+
+`ALTER TABLE child ADD CONSTRAINT ... FOREIGN KEY ...` validates every existing row while holding `SHARE ROW EXCLUSIVE`, blocking writes on both tables. Splitting creation from validation downgrades the full scan to `SHARE UPDATE EXCLUSIVE`:
+
+```sql
+SET lock_timeout = '2s';
+ALTER TABLE public.webhook_deliveries
+  ADD CONSTRAINT webhook_deliveries_workspace_fk
+  FOREIGN KEY (workspace_id) REFERENCES public.workspaces (id)
+  ON DELETE CASCADE NOT VALID;
+RESET lock_timeout;
+
+-- Scans existing rows under SHARE UPDATE EXCLUSIVE (concurrent reads & writes continue):
+ALTER TABLE public.webhook_deliveries
+  VALIDATE CONSTRAINT webhook_deliveries_workspace_fk;
+```
+
+### 4. Index referencing `FOREIGN KEY` columns (`MIG004`)
+
+PostgreSQL automatically creates a unique index on `workspaces(id)`, **never** on `webhook_deliveries(workspace_id)`. The day a customer deletes a workspace or a retention job prunes expired accounts, `ON DELETE CASCADE` (or referential integrity verification) executes a full sequential scan across `webhook_deliveries` for every deleted parent row.
+
+Inspect the exact `ModifyTable` (`Delete`) execution plan diff below:
+
+<PostgresFkCascadeDiffEmbed />
+
+Adding `webhook_deliveries_workspace_id_idx` drops parent deletion from `612.4 ms` (`61,012` buffer reads scanning 3.8M rows) to `0.48 ms` (`17` buffer hits).
+
+<Callout title="Avoid volatile defaults in ADD COLUMN" tone="amber">
+  <p>
+    Since PostgreSQL 11, <code>ADD COLUMN flag boolean NOT NULL DEFAULT false</code> is an instant catalog metadata update because <code>false</code> is non-volatile. By contrast, <code>DEFAULT gen_random_uuid()</code> or <code>DEFAULT random()</code> is volatile and forces a full physical table rewrite under <code>ACCESS EXCLUSIVE</code>.
+  </p>
+</Callout>
+
+## Enforcing migration rules automatically in GitHub Actions
+
+Code review catches unsafe DDL when a senior engineer happens to spot it; automated PR gates catch it every time. Drop [`culpritsql/culprit-ci`](https://github.com/culpritsql/culprit-ci) into `.github/workflows/sql-ci.yml`:
+
+```yaml
+name: SQL Migration Gate
+
+on:
+  pull_request:
+    paths:
+      - "migrations/**"
+      - "db/migrate/**"
+
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+
+jobs:
+  lint-migrations:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint PostgreSQL migrations & emit SARIF
+        id: sql-gate
+        uses: culpritsql/culprit-ci@v0.5.11
+        continue-on-error: true
+        with:
+          sql: "migrations/*.sql"
+          engine: "postgres"
+          fail-on: "high"
+          sarif-file: "culprit.sarif"
+          post-comment: "true"
+
+      - name: Annotate PR diff via GitHub Code Scanning
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: culprit.sarif
+
+      - name: Enforce gate
+        if: steps.sql-gate.outputs.passed != 'true'
+        run: exit 1
+```
+
+Notice one detail that keeps developers from muting the linter: `@culpritsql/ci` tracks `CREATE TABLE <name>` statements within the same migration file. Indexing or altering a brand-new empty table created two lines earlier never triggers false `MIG001` or `MIG006` alarms.
+
+When you also connect [Culprit SQL Studio](https://culpritsql.com) or [MCP coding agents](/blog/database-mcp-server-autonomous-verified-index-prs/), `culprit lint-sql prod-snapshot.json --file migrations/ --write` weights every migration against your real table row counts, write rates, and recorded query workload, and rewrites supported DDL into concurrent operations automatically.

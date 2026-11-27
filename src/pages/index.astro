@@ -45,8 +45,9 @@ const jsonLd = {
         datePublished: post.data.pubDate.toISOString(),
         image: `https://culpritsql.com/blog/${post.id}/og.png`,
         author: {
-          "@type": "Person",
+          "@type": "Organization",
           name: post.data.author,
+          url: "https://github.com/culpritsql",
         },
       })),
     },

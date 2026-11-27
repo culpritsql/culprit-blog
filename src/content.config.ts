@@ -10,7 +10,7 @@ const blog = defineCollection({
     seoDescription: z.string().min(110).max(160),
     pubDate: z.coerce.date(),
     updatedDate: z.coerce.date().optional(),
-    author: z.string().default("Cristian Pufu"),
+    author: z.string().default("Culprit Team"),
     tags: z.array(z.string()).default([]),
     keywords: z.array(z.string()).min(3),
     readingMinutes: z.number().int().positive(),

@@ -141,7 +141,7 @@ function buildOgSvg({ kicker, title, description, tags, footerLeft, footerRight 
   <!-- Bottom Divider & Byline -->
   <line x1="76" y1="530" x2="1124" y2="530" stroke="#282621" stroke-width="1.5"/>
   <circle cx="92" cy="566" r="16" fill="#262216" stroke="#ffcf33" stroke-width="1.5"/>
-  <text x="92" y="571" text-anchor="middle" font-family="Geist" font-size="12" font-weight="700" fill="#ffcf33">CP</text>
+  <text x="92" y="571" text-anchor="middle" font-family="Geist" font-size="12" font-weight="700" fill="#ffcf33">CS</text>
   <text x="120" y="572" font-family="Geist" font-size="18" font-weight="600" fill="#e6e3db">${escapeXml(footerLeft)}</text>
   <text x="1124" y="572" text-anchor="end" font-family="Geist Mono" font-size="16" font-weight="600" fill="#8f8b81">${escapeXml(footerRight)}</text>
 </svg>`;
@@ -250,6 +250,14 @@ function cleanMdxBodyForMarkdown(body) {
       "> [Interactive PostgreSQL EXPLAIN JSON Before/After comparison available on the web version](https://explain.culpritsql.com/compare)",
     )
     .replace(
+      /<PostgresSubtransDiffEmbed\s*\/>/g,
+      "> [Interactive PostgreSQL SubtransSLRU & Index Only Scan Heap Fetches comparison available on the web version](https://explain.culpritsql.com/compare)",
+    )
+    .replace(
+      /<PostgresFkCascadeDiffEmbed\s*\/>/g,
+      "> [Interactive PostgreSQL Foreign Key Cascade Seq Scan vs Index Scan comparison available on the web version](https://explain.culpritsql.com/compare)",
+    )
+    .replace(
       /<MssqlImplicitConversionEmbed\s*\/>/g,
       "> [Interactive SQL Server CONVERT_IMPLICIT .sqlplan comparison available on the web version](https://explain.culpritsql.com/compare)",
     )
@@ -274,7 +282,7 @@ const indexOgPng = renderSvgToPng(
     description:
       "Practical field notes on SQL Server .sqlplan diffs, deadlocks, Azure SQL Database Watcher, ADX KQL alerts, and PostgreSQL query tuning.",
     tags: ["SQL Server", "PostgreSQL", "Azure SQL", "ADX & KQL"],
-    footerLeft: "Cristian Pufu · Open-Source MIT Ecosystem",
+    footerLeft: "Culprit Team · Open-Source MIT Ecosystem",
     footerRight: "culpritsql.com/blog",
   }),
 );
@@ -296,7 +304,7 @@ for (const file of files) {
           .join("\n\n")}`
       : "";
   const updatedNote = meta.updatedDate ? ` · Updated: ${meta.updatedDate}` : "";
-  const mdOut = `# ${meta.title}\n\nPublished: ${meta.pubDate}${updatedNote} · Author: ${meta.author || "Cristian Pufu"} · Canonical: https://culpritsql.com/blog/${slug}/\n\n${meta.description}\n\n---\n\n${cleanBody}${faqBlock}\n`;
+  const mdOut = `# ${meta.title}\n\nPublished: ${meta.pubDate}${updatedNote} · Author: ${meta.author || "Culprit Team"} · Canonical: https://culpritsql.com/blog/${slug}/\n\n${meta.description}\n\n---\n\n${cleanBody}${faqBlock}\n`;
 
   fs.writeFileSync(path.join(distDir, `${slug}.md`), mdOut, "utf8");
 
@@ -308,7 +316,7 @@ for (const file of files) {
       title: meta.title,
       description: meta.seoDescription || meta.description,
       tags: Array.isArray(meta.tags) ? meta.tags : [],
-      footerLeft: meta.author || "Cristian Pufu",
+      footerLeft: meta.author || "Culprit Team",
       footerRight: `culpritsql.com/blog/${slug}`,
     }),
   );

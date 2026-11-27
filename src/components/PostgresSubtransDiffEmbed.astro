@@ -1,0 +1,22 @@
+---
+import { getPostgresSubtransDiffDemo } from "../lib/demoArtifacts";
+import { PlanDiffIsland } from "./PlanDiffIsland";
+
+const { a, b, diff, nameA, nameB, explainUrl } = await getPostgresSubtransDiffDemo();
+const caption =
+  "Live @culpritsql/plan-viewer PostgreSQL EXPLAIN diff: when long snapshots and savepoint churn prevent visibility-map bits from setting, an Index Only Scan degrades into 38,400 heap tuple visibility checks (384.8 ms) vs 0 heap fetches (1.84 ms) once INSERT ... ON CONFLICT replaces nested savepoints.";
+---
+
+<div class="blog-wide">
+  <PlanDiffIsland
+    client:visible
+    a={a}
+    b={b}
+    diff={diff}
+    nameA={nameA}
+    nameB={nameB}
+    explainUrl={explainUrl}
+    caption={caption}
+    pillLabel="Live PostgreSQL EXPLAIN diff"
+  />
+</div>

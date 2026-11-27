@@ -16,6 +16,8 @@ const EXPECTED_SLUGS = [
   "database-mcp-server-autonomous-verified-index-prs",
   "microsoft-database-hub-vs-culprit-adx",
   "monitor-azure-sql-postgres-fleet-aks-adx-helm",
+  "postgres-subtransaction-slru-savepoint-cliff",
+  "postgres-zero-downtime-migrations-lock-queue-ci",
   "sql-blocking-deploy-regression-alerts-slack-teams-pagerduty",
   "sql-server-containers-apple-silicon-mac-rosetta-arm64",
   "why-database-monitors-cry-wolf-seven-evidence-rules",
@@ -71,7 +73,7 @@ function readPngDimensions(pngPath: string): { width: number; height: number } {
 }
 
 describe("Culprit SQL Blog content, prose quality, and textbook SEO", () => {
-  test("contains all 11 expected posts with SERP-sized SEO frontmatter, valid internal links, and zero AI buzzwords", () => {
+  test("contains all 13 expected posts with SERP-sized SEO frontmatter, valid internal links, and zero AI buzzwords", () => {
     const mdxFiles = fs.readdirSync(contentDir).filter((f) => f.endsWith(".mdx")).sort();
     expect(mdxFiles).toEqual(EXPECTED_SLUGS.map((s) => `${s}.mdx`));
 
@@ -207,7 +209,9 @@ describe("Culprit SQL Blog content, prose quality, and textbook SEO", () => {
         if (
           r.slug === "microsoft-database-hub-vs-culprit-adx" ||
           r.slug === "automated-sql-root-cause-investigations-adx-clickhouse-schema" ||
-          r.slug === "sql-server-containers-apple-silicon-mac-rosetta-arm64"
+          r.slug === "sql-server-containers-apple-silicon-mac-rosetta-arm64" ||
+          r.slug === "postgres-subtransaction-slru-savepoint-cliff" ||
+          r.slug === "postgres-zero-downtime-migrations-lock-queue-ci"
         ) {
           expect(types).toContain("FAQPage");
         }
@@ -219,6 +223,8 @@ describe("Culprit SQL Blog content, prose quality, and textbook SEO", () => {
           r.slug === "microsoft-database-hub-vs-culprit-adx" ||
           r.slug === "database-fleet-dashboard-adx-without-grafana-enterprise" ||
           r.slug === "database-mcp-server-autonomous-verified-index-prs" ||
+          r.slug === "postgres-subtransaction-slru-savepoint-cliff" ||
+          r.slug === "postgres-zero-downtime-migrations-lock-queue-ci" ||
           r.slug === "why-database-monitors-cry-wolf-seven-evidence-rules"
         ) {
           expect(html).toContain("https://explain.culpritsql.com/compare#s=z1.");

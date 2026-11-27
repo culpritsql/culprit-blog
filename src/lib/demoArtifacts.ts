@@ -621,3 +621,256 @@ export async function getPostgresMcpPlanDiffDemo(): Promise<{
   });
   return { a, b, diff, nameA, nameB, explainUrl };
 }
+
+const PG_SUBTRANS_HEAP_BEFORE_JSON = JSON.stringify([
+  {
+    Plan: {
+      "Node Type": "Limit",
+      "Startup Cost": 1480.2,
+      "Total Cost": 1480.33,
+      "Plan Rows": 50,
+      "Plan Width": 92,
+      "Actual Startup Time": 384.2,
+      "Actual Total Time": 384.6,
+      "Actual Rows": 50,
+      "Actual Loops": 1,
+      "Shared Hit Blocks": 31200,
+      "Shared Read Blocks": 7200,
+      Plans: [
+        {
+          "Node Type": "Sort",
+          "Parent Relationship": "Outer",
+          "Sort Key": ["attempted_at DESC"],
+          "Sort Method": "top-N heapsort",
+          "Sort Space Used": 38,
+          "Sort Space Type": "Memory",
+          "Startup Cost": 1480.2,
+          "Total Cost": 1528.7,
+          "Plan Rows": 19400,
+          "Plan Width": 92,
+          "Actual Startup Time": 384.1,
+          "Actual Total Time": 384.5,
+          "Actual Rows": 50,
+          "Actual Loops": 1,
+          "Shared Hit Blocks": 31200,
+          "Shared Read Blocks": 7200,
+          Plans: [
+            {
+              "Node Type": "Index Only Scan",
+              "Parent Relationship": "Outer",
+              "Scan Direction": "Backward",
+              "Index Name": "payment_attempts_merchant_state_attempted_idx",
+              "Relation Name": "payment_attempts",
+              Schema: "public",
+              Alias: "payment_attempts",
+              "Startup Cost": 0.56,
+              "Total Cost": 836.4,
+              "Plan Rows": 19400,
+              "Plan Width": 92,
+              "Actual Startup Time": 0.42,
+              "Actual Total Time": 376.8,
+              "Actual Rows": 19420,
+              "Actual Loops": 1,
+              "Index Cond": "((merchant_id = 9042) AND (state = 'pending'::text))",
+              "Heap Fetches": 38400,
+              "Shared Hit Blocks": 31200,
+              "Shared Read Blocks": 7200,
+            },
+          ],
+        },
+      ],
+    },
+    "Planning Time": 0.24,
+    "Execution Time": 384.8,
+  },
+]);
+
+const PG_SUBTRANS_CLEAN_AFTER_JSON = JSON.stringify([
+  {
+    Plan: {
+      "Node Type": "Limit",
+      "Startup Cost": 0.56,
+      "Total Cost": 3.92,
+      "Plan Rows": 50,
+      "Plan Width": 92,
+      "Actual Startup Time": 0.06,
+      "Actual Total Time": 1.78,
+      "Actual Rows": 50,
+      "Actual Loops": 1,
+      "Shared Hit Blocks": 8,
+      "Shared Read Blocks": 0,
+      Plans: [
+        {
+          "Node Type": "Index Only Scan",
+          "Parent Relationship": "Outer",
+          "Scan Direction": "Backward",
+          "Index Name": "payment_attempts_merchant_state_attempted_idx",
+          "Relation Name": "payment_attempts",
+          Schema: "public",
+          Alias: "payment_attempts",
+          "Startup Cost": 0.56,
+          "Total Cost": 1304.2,
+          "Plan Rows": 19400,
+          "Plan Width": 92,
+          "Actual Startup Time": 0.05,
+          "Actual Total Time": 1.72,
+          "Actual Rows": 50,
+          "Actual Loops": 1,
+          "Index Cond": "((merchant_id = 9042) AND (state = 'pending'::text))",
+          "Heap Fetches": 0,
+          "Shared Hit Blocks": 8,
+          "Shared Read Blocks": 0,
+        },
+      ],
+    },
+    "Planning Time": 0.16,
+    "Execution Time": 1.84,
+  },
+]);
+
+export async function getPostgresSubtransDiffDemo(): Promise<{
+  a: Plan;
+  b: Plan;
+  diff: PlanDiff;
+  nameA: string;
+  nameB: string;
+  explainUrl: string;
+}> {
+  await ensureNodeWasm();
+  const nameA = "Savepoint loop + 38.4K Heap Fetches";
+  const nameB = "ON CONFLICT + all-visible VM";
+  const a = plans.parsePlan(PG_SUBTRANS_HEAP_BEFORE_JSON, "postgres");
+  const b = plans.parsePlan(PG_SUBTRANS_CLEAN_AFTER_JSON, "postgres");
+  const diff = plans.diffPlans(a, nameA, b, nameB);
+  const explainUrl = buildExplainShareUrl("compare", {
+    v: 1,
+    m: "compare",
+    e: "postgres",
+    na: nameA,
+    pa: PG_SUBTRANS_HEAP_BEFORE_JSON,
+    nb: nameB,
+    pb: PG_SUBTRANS_CLEAN_AFTER_JSON,
+  });
+  return { a, b, diff, nameA, nameB, explainUrl };
+}
+
+const PG_FK_SEQ_SCAN_BEFORE_JSON = JSON.stringify([
+  {
+    Plan: {
+      "Node Type": "ModifyTable",
+      Operation: "Delete",
+      "Parallel Aware": false,
+      "Relation Name": "webhook_deliveries",
+      Schema: "public",
+      Alias: "webhook_deliveries",
+      "Startup Cost": 0.0,
+      "Total Cost": 96420.0,
+      "Plan Rows": 12,
+      "Plan Width": 6,
+      "Actual Startup Time": 612.1,
+      "Actual Total Time": 612.3,
+      "Actual Rows": 0,
+      "Actual Loops": 1,
+      "Shared Hit Blocks": 18412,
+      "Shared Read Blocks": 42600,
+      Plans: [
+        {
+          "Node Type": "Seq Scan",
+          "Parent Relationship": "Outer",
+          "Parallel Aware": false,
+          "Relation Name": "webhook_deliveries",
+          Schema: "public",
+          Alias: "webhook_deliveries",
+          "Startup Cost": 0.0,
+          "Total Cost": 96420.0,
+          "Plan Rows": 12,
+          "Plan Width": 6,
+          "Actual Startup Time": 14.8,
+          "Actual Total Time": 611.9,
+          "Actual Rows": 12,
+          "Actual Loops": 1,
+          Filter: "(workspace_id = 71904)",
+          "Rows Removed by Filter": 3799988,
+          "Shared Hit Blocks": 18400,
+          "Shared Read Blocks": 42600,
+        },
+      ],
+    },
+    "Planning Time": 0.31,
+    "Execution Time": 612.4,
+  },
+]);
+
+const PG_FK_INDEX_SCAN_AFTER_JSON = JSON.stringify([
+  {
+    Plan: {
+      "Node Type": "ModifyTable",
+      Operation: "Delete",
+      "Parallel Aware": false,
+      "Relation Name": "webhook_deliveries",
+      Schema: "public",
+      Alias: "webhook_deliveries",
+      "Startup Cost": 0.43,
+      "Total Cost": 14.82,
+      "Plan Rows": 12,
+      "Plan Width": 6,
+      "Actual Startup Time": 0.44,
+      "Actual Total Time": 0.46,
+      "Actual Rows": 0,
+      "Actual Loops": 1,
+      "Shared Hit Blocks": 17,
+      "Shared Read Blocks": 0,
+      Plans: [
+        {
+          "Node Type": "Index Scan",
+          "Parent Relationship": "Outer",
+          "Parallel Aware": false,
+          "Scan Direction": "Forward",
+          "Index Name": "webhook_deliveries_workspace_id_idx",
+          "Relation Name": "webhook_deliveries",
+          Schema: "public",
+          Alias: "webhook_deliveries",
+          "Startup Cost": 0.43,
+          "Total Cost": 14.82,
+          "Plan Rows": 12,
+          "Plan Width": 6,
+          "Actual Startup Time": 0.06,
+          "Actual Total Time": 0.21,
+          "Actual Rows": 12,
+          "Actual Loops": 1,
+          "Index Cond": "(workspace_id = 71904)",
+          "Shared Hit Blocks": 5,
+          "Shared Read Blocks": 0,
+        },
+      ],
+    },
+    "Planning Time": 0.19,
+    "Execution Time": 0.48,
+  },
+]);
+
+export async function getPostgresFkCascadeDiffDemo(): Promise<{
+  a: Plan;
+  b: Plan;
+  diff: PlanDiff;
+  nameA: string;
+  nameB: string;
+  explainUrl: string;
+}> {
+  await ensureNodeWasm();
+  const nameA = "Unindexed FK cascade (3.8M Seq Scan)";
+  const nameB = "With CONCURRENTLY FK index";
+  const a = plans.parsePlan(PG_FK_SEQ_SCAN_BEFORE_JSON, "postgres");
+  const b = plans.parsePlan(PG_FK_INDEX_SCAN_AFTER_JSON, "postgres");
+  const diff = plans.diffPlans(a, nameA, b, nameB);
+  const explainUrl = buildExplainShareUrl("compare", {
+    v: 1,
+    m: "compare",
+    e: "postgres",
+    na: nameA,
+    pa: PG_FK_SEQ_SCAN_BEFORE_JSON,
+    nb: nameB,
+    pb: PG_FK_INDEX_SCAN_AFTER_JSON,
+  });
+  return { a, b, diff, nameA, nameB, explainUrl };
+}

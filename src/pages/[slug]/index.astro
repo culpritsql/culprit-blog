@@ -68,9 +68,9 @@ const graphNodes: Record<string, unknown>[] = [
     keywords: post.data.keywords.join(", "),
     timeRequired: `PT${post.data.readingMinutes}M`,
     author: {
-      "@type": "Person",
+      "@type": "Organization",
       name: post.data.author,
-      url: "https://github.com/cristipufu",
+      url: "https://github.com/culpritsql",
     },
     publisher: {
       "@type": "Organization",
@@ -167,7 +167,7 @@ const jsonLd = {
 
         <div class="article-byline">
           <div class="author-chip">
-            <span class="author-avatar" aria-hidden="true">CP</span>
+            <span class="author-avatar" aria-hidden="true">CS</span>
             <div>
               <strong>{post.data.author}</strong>
               <div class="byline-sub">
@@ -232,6 +232,7 @@ const jsonLd = {
           </p>
           <div class="article-foot-actions">
             <a class="btn primary" href="https://culpritsql.com/#download">Download SQL Studio</a>
+            <a class="btn ghost" href="https://fleet.culpritsql.com">Live Fleet Demo</a>
             <a class="btn ghost" href="https://explain.culpritsql.com">Open Culprit Explain</a>
             <a class="btn ghost" href="https://marketplace.visualstudio.com/items?itemName=culpritsql.culprit-sql" rel="noopener">
               VS Code Extension

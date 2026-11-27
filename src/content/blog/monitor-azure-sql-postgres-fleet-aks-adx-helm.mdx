@@ -133,4 +133,4 @@ ProdFleetSummary(now(), ago(1h), now())
 | summarize Targets = count(), ActiveIncidents = sum(ActiveIncidents) by FreshnessState, Engine
 ```
 
-Once data is landing, point [`culprit-archive-web`](/blog/database-fleet-dashboard-adx-without-grafana-enterprise/) at the read-only ADX endpoint for zero-seat browser triage, and wire [`culprit collect notify`](/blog/sql-blocking-deploy-regression-alerts-slack-teams-pagerduty/) so Slack or PagerDuty pages on culprits rather than raw CPU spikes.
+Once data is landing, deploy [Culprit Fleet](https://fleet.culpritsql.com/) (`oci://ghcr.io/culpritsql/charts/culprit-fleet`) or [`culprit-archive-web`](/blog/database-fleet-dashboard-adx-without-grafana-enterprise/) at the read-only ADX endpoint for zero-seat browser triage and remote MCP, and wire [`culprit collect notify`](/blog/sql-blocking-deploy-regression-alerts-slack-teams-pagerduty/) so Slack or PagerDuty pages on culprits rather than raw CPU spikes.

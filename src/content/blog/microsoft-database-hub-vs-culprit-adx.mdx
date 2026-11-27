@@ -54,7 +54,7 @@ The cost structure shifts as soon as on-call engineers try to wire it into real 
 | **Supported engines** | Azure SQL DB, MI, SQL on Azure VMs, Arc SQL | Azure SQL, SQL Server, PostgreSQL / RDS, TimescaleDB, YugabyteDB, MySQL, MariaDB (+ SQLite in Studio/CLI) |
 | **Collector deployment** | Microsoft-managed control plane | Stateless read-only container / [AKS Helm chart](/blog/monitor-azure-sql-postgres-fleet-aks-adx-helm/) with Workload Identity |
 | **Analytical store** | Fabric Eventhouse / OneLake | Your own ADX cluster or [self-hosted ClickHouse](/blog/azure-data-explorer-vs-clickhouse-database-telemetry/) |
-| **Viewer & seat licensing** | Power BI Pro below F64 (`~$8,400/mo`) | **$0** ([`culprit-archive-web`](/blog/database-fleet-dashboard-adx-without-grafana-enterprise/) + MIT desktop & CLI) |
+| **Viewer & seat licensing** | Power BI Pro below F64 (`~$8,400/mo`) | **$0** ([Culprit Fleet](https://fleet.culpritsql.com/), [`culprit-archive-web`](/blog/database-fleet-dashboard-adx-without-grafana-enterprise/), MIT desktop & CLI) |
 | **Alerting engine** | Fabric Data Activator (consumes CUs) | **$0** built-in [`culprit-notify`](/blog/sql-blocking-deploy-regression-alerts-slack-teams-pagerduty/) (Slack, Teams, PagerDuty, Webhooks, GitHub) |
 | **Execution plan depth** | Aggregated Query Store metrics in portal | Full `.sqlplan` & `EXPLAIN` recovery, 32 plan-insight rules, synchronized Before/After plan diff |
 | **Blocking & deadlocks** | Wait counters & basic session lists | Causal head-blocker chains, `.xel` / ring-buffer deadlock graphs, page-latch & TempDB attribution ([full investigation matrix](/blog/automated-sql-root-cause-investigations-adx-clickhouse-schema/)) |

@@ -21,7 +21,7 @@ import StatStrip from "../../components/StatStrip.astro";
   label="TL;DR"
   items={[
     "<strong>ADX is cheap for telemetry, but dashboards around it often are not:</strong> Grafana's official Azure Data Explorer datasource requires Grafana Enterprise or paid Grafana Cloud, and Fabric requires Power BI Pro per viewer below F64.",
-    "<strong><code>culprit-archive-web</code> serves Culprit's Estate Triage UI and plan differ in a browser for $0,</strong> backed strictly by read-only ADX/ClickHouse and Blob Storage credentials.",
+    "<strong><code>culprit-fleet</code> and <code>culprit-archive-web</code> serve Estate Triage and plan diffs in a browser for $0,</strong> backed strictly by read-only ADX/ClickHouse and Blob Storage credentials.",
     "<strong>Compiled without database drivers:</strong> CI enforces that the web binary cannot import TDS, libpq, or MySQL client crates, so exposing dashboards internally never widens database network access."
   ]}
 />
@@ -93,4 +93,18 @@ culprit-archive-web \
 
 If a user switches time windows mid-query or closes the browser tab, the HTTP handler cancels the underlying Kusto or S3 stream immediately via `CollectionCancellation` so stray tab clicks cannot pile up expensive warehouse scans.
 
-Pair this viewer with [AKS Helm auto-discovery](/blog/monitor-azure-sql-postgres-fleet-aks-adx-helm/) for ingestion and [`culprit-notify`](/blog/sql-blocking-deploy-regression-alerts-slack-teams-pagerduty/) for Slack/PagerDuty links that drop responders straight onto the affected resource window.
+## Multi-region RBAC and remote MCP with Culprit Fleet
+
+When you run multiple regional archives (for example US ClickHouse + S3 alongside EU ADX + Blob) and want built-in Microsoft Entra ID / OIDC role mapping, per-database resource grants, an `access_audit` trail, and a shared `POST /mcp` server for coding agents, deploy [Culprit Fleet](https://github.com/culpritsql/culprit-fleet) ([try the live demo at `fleet.culpritsql.com`](https://fleet.culpritsql.com/)) from its OCI Helm chart:
+
+```sh
+helm upgrade --install culprit-fleet oci://ghcr.io/culpritsql/charts/culprit-fleet \
+  --namespace observability \
+  --create-namespace \
+  --set imageTag=main \
+  --set config.existingConfigMap=culprit-fleet-config \
+  --set existingSecret=culprit-fleet-credentials \
+  --set persistence.existingClaim=culprit-fleet-state
+```
+
+Pair either viewer with [AKS Helm auto-discovery](/blog/monitor-azure-sql-postgres-fleet-aks-adx-helm/) for ingestion and [`culprit-notify`](/blog/sql-blocking-deploy-regression-alerts-slack-teams-pagerduty/) for Slack/PagerDuty links that drop responders straight onto the affected resource window.

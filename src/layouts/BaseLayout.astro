@@ -36,6 +36,18 @@ const {
 const canonicalUrl = new URL(canonicalPath, "https://culpritsql.com").toString();
 const ogImageUrl = new URL(ogImagePath, "https://culpritsql.com").toString();
 const markdownUrl = markdownPath ? new URL(markdownPath, "https://culpritsql.com").toString() : null;
+
+const LOCALES = [
+  { code: "en", hreflang: "en", label: "English", href: "https://culpritsql.com/" },
+  { code: "zh", hreflang: "zh-Hans", label: "简体中文", href: "https://culpritsql.com/zh/" },
+  { code: "ja", hreflang: "ja", label: "日本語", href: "https://culpritsql.com/ja/" },
+  { code: "ko", hreflang: "ko", label: "한국어", href: "https://culpritsql.com/ko/" },
+  { code: "ru", hreflang: "ru", label: "Русский", href: "https://culpritsql.com/ru/" },
+  { code: "de", hreflang: "de", label: "Deutsch", href: "https://culpritsql.com/de/" },
+  { code: "es", hreflang: "es", label: "Español", href: "https://culpritsql.com/es/" },
+  { code: "fr", hreflang: "fr", label: "Français", href: "https://culpritsql.com/fr/" },
+  { code: "pt", hreflang: "pt-BR", label: "Português", href: "https://culpritsql.com/pt/" },
+];
 ---
 
 <!doctype html>
@@ -50,13 +62,14 @@ const markdownUrl = markdownPath ? new URL(markdownPath, "https://culpritsql.com
     <meta name="author" content={author} />
     <link rel="canonical" href={canonicalUrl} />
     <link rel="alternate" type="application/rss+xml" title="Culprit SQL Blog RSS" href="https://culpritsql.com/blog/rss.xml" />
+    <link rel="alternate" type="application/rss+xml" title="Culprit SQL Releases RSS" href="https://culpritsql.com/releases/rss.xml" />
     {markdownUrl && <link rel="alternate" type="text/markdown" title="Markdown version" href={markdownUrl} />}
     <meta name="color-scheme" content="light dark" />
     <meta name="theme-color" content="#0f0e0c" media="(prefers-color-scheme: dark)" />
     <meta name="theme-color" content="#fbfaf7" media="(prefers-color-scheme: light)" />
 
     <meta property="og:type" content={ogType} />
-    <meta property="og:site_name" content="Culprit SQL Studio" />
+    <meta property="og:site_name" content="Culprit SQL" />
     <meta property="og:locale" content="en_US" />
     <meta property="og:url" content={canonicalUrl} />
     <meta property="og:title" content={title} />
@@ -84,7 +97,7 @@ const markdownUrl = markdownPath ? new URL(markdownPath, "https://culpritsql.com
     <script is:inline>
       (function () {
         try {
-          var saved = localStorage.getItem("culprit-blog:theme");
+          var saved = localStorage.getItem("culprit:theme") || localStorage.getItem("culprit-blog:theme");
           if (saved === "dark" || saved === "light") {
             document.documentElement.dataset.theme = saved;
           }
@@ -98,29 +111,79 @@ const markdownUrl = markdownPath ? new URL(markdownPath, "https://culpritsql.com
   <body>
     <header class="nav">
       <div class="wrap nav-row">
-        <a class="brand" href="https://culpritsql.com/" aria-label="Culprit SQL Studio home">
-          <img src="/blog/favicon.svg" width="28" height="28" alt="Culprit SQL logo" />
-          <span>Culprit <b>SQL Studio</b></span>
+        <a class="brand" href="https://culpritsql.com/" aria-label="Culprit SQL">
+          <img src="/blog/favicon.svg" width="26" height="26" alt="Culprit SQL logo" />
+          <span>Culprit <b>SQL</b></span>
         </a>
         <nav class="nav-links" aria-label="Primary">
-          <a href="https://culpritsql.com/#findings">Features</a>
-          <a href="https://culpritsql.com/#agents">Agents</a>
-          <a href="https://culpritsql.com/#engines">Databases</a>
-          <a href="https://fleet.culpritsql.com">Fleet</a>
-          <a href="https://explain.culpritsql.com">Explain</a>
+          <details class="nav-dropdown">
+            <summary>
+              Products
+              <svg class="nav-caret" aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="m4 6 4 4 4-4" stroke-linecap="round" stroke-linejoin="round"></path>
+              </svg>
+            </summary>
+            <div class="nav-panel">
+              <a class="nav-prod" href="https://culpritsql.com/studio/">
+                <span class="nav-prod-head"><span>Studio &amp; CLI</span><span class="nav-prod-tag">App · CLI · MCP</span></span>
+                <p>14 MB native desktop app, JSON/SARIF CLI, and 27-tool local MCP server.</p>
+              </a>
+              <a class="nav-prod" href="https://culpritsql.com/fleet/">
+                <span class="nav-prod-head"><span>Fleet &amp; Collector</span><span class="nav-prod-tag">ADX · ClickHouse</span></span>
+                <p>24/7 zero-credential fleet triage over your own ADX or ClickHouse.</p>
+              </a>
+              <a class="nav-prod" href="https://culpritsql.com/explain/">
+                <span class="nav-prod-head"><span>Explain &amp; Wasm</span><span class="nav-prod-tag">Wasm · .xel</span></span>
+                <p>Client-side execution plan, diff, deadlock, and .xel workbench.</p>
+              </a>
+              <a class="nav-prod" href="https://culpritsql.com/ci/">
+                <span class="nav-prod-head"><span>CI, IDE &amp; SDKs</span><span class="nav-prod-tag">SARIF · VS Code</span></span>
+                <p>Offline PR migration gates, VS Code extension, and test assertions.</p>
+              </a>
+              <div class="nav-panel-foot">
+                <span>100% Open Source · MIT License</span>
+                <span><a href="https://fleet.culpritsql.com">Live Fleet demo ↗</a> · <a href="https://explain.culpritsql.com">Open Explain ↗</a></span>
+              </div>
+            </div>
+          </details>
+          <a href="https://culpritsql.com/enterprise/">Enterprise</a>
+          <a href="https://culpritsql.com/databases/">Databases</a>
+          <a href="https://culpritsql.com/releases/">Releases</a>
           <a href="/blog/" class="active">Blog</a>
         </nav>
         <div class="nav-cta">
+          <details class="lang-menu">
+            <summary aria-label="Language">
+              <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z"></path>
+              </svg>
+              <span class="lang-full">English</span>
+              <svg class="nav-caret" aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="m4 6 4 4 4-4" stroke-linecap="round" stroke-linejoin="round"></path>
+              </svg>
+            </summary>
+            <div class="lang-list">
+              {
+                LOCALES.map((loc) => (
+                  <a class={loc.code === "en" ? "lang-item active" : "lang-item"} href={loc.href} hreflang={loc.hreflang}>
+                    <span>{loc.label}</span>
+                    {loc.code === "en" && <span>✓</span>}
+                  </a>
+                ))
+              }
+            </div>
+          </details>
           <button type="button" class="icon-btn" id="theme-toggle" aria-label="Toggle color theme" title="Toggle color theme">
-            <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg class="icon-sun" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <circle cx="12" cy="12" r="4"></circle>
               <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path>
             </svg>
-            <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg class="icon-moon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path>
             </svg>
           </button>
-          <a class="btn ghost hide-xs" href="https://github.com/culpritsql" rel="noopener">
+          <a class="btn ghost hide-xs" href="https://github.com/culpritsql/culprit-sql-studio" rel="noopener">
             <svg aria-hidden="true" viewBox="0 0 16 16" width="15" height="15">
               <path
                 fill="currentColor"
@@ -129,7 +192,28 @@ const markdownUrl = markdownPath ? new URL(markdownPath, "https://culpritsql.com
             </svg>
             <span>GitHub</span>
           </a>
-          <a class="btn primary" href="https://culpritsql.com/#download">Download</a>
+          <a class="btn primary" href="https://culpritsql.com/studio/#download">Get Culprit</a>
+          <details class="mobile-menu">
+            <summary class="icon-btn" aria-label="Menu">
+              <svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M4 7h16M4 12h16M4 17h16" stroke-linecap="round"></path>
+              </svg>
+            </summary>
+            <div class="mobile-drawer">
+              <div class="mobile-drawer-group">Products</div>
+              <a href="https://culpritsql.com/studio/"><span>Studio &amp; CLI</span><span class="nav-prod-tag">App · CLI</span></a>
+              <a href="https://culpritsql.com/fleet/"><span>Fleet &amp; Collector</span><span class="nav-prod-tag">24/7</span></a>
+              <a href="https://culpritsql.com/explain/"><span>Explain &amp; Wasm</span><span class="nav-prod-tag">Wasm</span></a>
+              <a href="https://culpritsql.com/ci/"><span>CI, IDE &amp; SDKs</span><span class="nav-prod-tag">SARIF</span></a>
+              <div class="mobile-drawer-group">Culprit SQL</div>
+              <a href="https://culpritsql.com/enterprise/">Enterprise</a>
+              <a href="https://culpritsql.com/databases/">Databases</a>
+              <a href="https://culpritsql.com/releases/">Releases</a>
+              <a href="/blog/" class="active">Blog</a>
+              <a href="https://github.com/culpritsql" rel="noopener">GitHub (@culpritsql) ↗</a>
+              <a class="mobile-cta" href="https://culpritsql.com/studio/#download">Get Culprit</a>
+            </div>
+          </details>
         </div>
       </div>
       {showProgress && <div class="scroll-progress" id="scroll-progress" aria-hidden="true" />}
@@ -140,22 +224,62 @@ const markdownUrl = markdownPath ? new URL(markdownPath, "https://culpritsql.com
     </main>
 
     <footer class="footer">
-      <div class="wrap foot-row">
-        <a class="brand" href="https://culpritsql.com/">
-          <img src="/blog/favicon.svg" width="22" height="22" alt="Culprit SQL logo" />
-          <span>Culprit <b>SQL Studio</b></span>
-        </a>
-        <nav class="foot-nav" aria-label="Footer">
-          <a href="/blog/">Blog</a>
-          <a href="/blog/rss.xml">RSS</a>
-          <a href="https://fleet.culpritsql.com">Fleet</a>
-          <a href="https://explain.culpritsql.com">Explain</a>
-          <a href="https://github.com/culpritsql/culprit-sql-studio/blob/main/docs/guide.md" rel="noopener">Guide</a>
-          <a href="https://github.com/culpritsql/culprit-sql-studio/blob/main/docs/collector.md" rel="noopener">Collector &amp; ADX</a>
-          <a href="https://culpritsql.com/llms.txt">llms.txt</a>
-          <a href="https://github.com/culpritsql/culprit-blog" rel="noopener">Source</a>
-        </nav>
-        <span>© 2026 Culprit SQL Studio</span>
+      <div class="wrap">
+        <div class="foot-grid">
+          <div class="foot-brand">
+            <a class="brand" href="https://culpritsql.com/">
+              <img src="/blog/favicon.svg" width="24" height="24" alt="Culprit SQL logo" />
+              <span>Culprit <b>SQL</b></span>
+            </a>
+            <p>Deterministic database root-cause engineering across local development, CI pull requests, and 24/7 production fleets. Free and open source under MIT.</p>
+          </div>
+          <div class="foot-col">
+            <h3>Platform</h3>
+            <ul>
+              <li><a href="https://culpritsql.com/studio/">Studio &amp; CLI</a></li>
+              <li><a href="https://culpritsql.com/fleet/">Fleet &amp; Collector</a></li>
+              <li><a href="https://culpritsql.com/explain/">Explain &amp; Wasm</a></li>
+              <li><a href="https://culpritsql.com/ci/">CI, IDE &amp; SDKs</a></li>
+              <li><a href="https://culpritsql.com/enterprise/">Enterprise</a></li>
+            </ul>
+          </div>
+          <div class="foot-col">
+            <h3>Developers</h3>
+            <ul>
+              <li><a href="https://fleet.culpritsql.com">fleet.culpritsql.com ↗</a></li>
+              <li><a href="https://explain.culpritsql.com">explain.culpritsql.com ↗</a></li>
+              <li><a href="https://github.com/culpritsql/culprit-vscode" rel="noopener">VS Code Extension</a></li>
+              <li><a href="https://github.com/culpritsql/culprit-ci" rel="noopener">@culpritsql/ci</a></li>
+              <li><a href="https://github.com/culpritsql/culprit-plans" rel="noopener">@culpritsql/plans</a></li>
+            </ul>
+          </div>
+          <div class="foot-col">
+            <h3>Databases</h3>
+            <ul>
+              <li><a href="https://culpritsql.com/databases/sql-server/">SQL Server &amp; Azure SQL</a></li>
+              <li><a href="https://culpritsql.com/databases/postgresql/">PostgreSQL &amp; RDS</a></li>
+              <li><a href="https://culpritsql.com/databases/timescaledb/">TimescaleDB</a></li>
+              <li><a href="https://culpritsql.com/databases/yugabytedb/">YugabyteDB</a></li>
+              <li><a href="https://culpritsql.com/databases/mysql/">MySQL &amp; MariaDB</a></li>
+              <li><a href="https://culpritsql.com/databases/sqlite/">SQLite</a></li>
+            </ul>
+          </div>
+          <div class="foot-col">
+            <h3>Resources</h3>
+            <ul>
+              <li><a href="/blog/">Blog</a></li>
+              <li><a href="/blog/rss.xml">Blog RSS</a></li>
+              <li><a href="https://culpritsql.com/releases/">Releases</a></li>
+              <li><a href="https://culpritsql.com/releases/rss.xml">Releases RSS</a></li>
+              <li><a href="https://culpritsql.com/llms.txt">llms.txt</a></li>
+              <li><a href="https://github.com/culpritsql/culprit-sql-studio/blob/main/LICENSE" rel="noopener">MIT License</a></li>
+            </ul>
+          </div>
+        </div>
+        <div class="foot-bottom">
+          <span>© 2026 Culprit SQL · Released under the MIT License</span>
+          <span><a href="https://github.com/culpritsql" rel="noopener">github.com/culpritsql</a> · <a href="https://culpritsql.com/llms-full.txt">llms-full.txt</a></span>
+        </div>
       </div>
     </footer>
 
@@ -171,10 +295,27 @@ const markdownUrl = markdownPath ? new URL(markdownPath, "https://culpritsql.com
             var next = current === "dark" ? "light" : "dark";
             root.dataset.theme = next;
             try {
+              localStorage.setItem("culprit:theme", next);
               localStorage.setItem("culprit-blog:theme", next);
             } catch (_) {}
           });
         }
+
+        var popovers = Array.prototype.slice.call(
+          document.querySelectorAll("details.nav-dropdown, details.lang-menu, details.mobile-menu"),
+        );
+        document.addEventListener("click", function (e) {
+          popovers.forEach(function (d) {
+            if (d.open && !d.contains(e.target)) d.open = false;
+          });
+        });
+        document.addEventListener("keydown", function (e) {
+          if (e.key === "Escape") {
+            popovers.forEach(function (d) {
+              d.open = false;
+            });
+          }
+        });
 
         var bar = document.getElementById("scroll-progress");
         if (bar) {
@@ -188,7 +329,6 @@ const markdownUrl = markdownPath ? new URL(markdownPath, "https://culpritsql.com
           updateProgress();
         }
 
-        // Add subtle # permalink anchors to article headings
         var headings = document.querySelectorAll(".article-prose h2[id], .article-prose h3[id]");
         headings.forEach(function (h) {
           if (h.querySelector(".heading-anchor")) return;
@@ -200,7 +340,6 @@ const markdownUrl = markdownPath ? new URL(markdownPath, "https://culpritsql.com
           h.appendChild(a);
         });
 
-        // Enhance code blocks with language header and Copy button
         var pres = document.querySelectorAll("pre.astro-code");
         pres.forEach(function (pre) {
           if (pre.parentElement && pre.parentElement.classList.contains("code-frame")) return;

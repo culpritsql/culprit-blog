@@ -126,9 +126,11 @@ function buildOgSvg({ kicker, title, description, tags, footerLeft, footerRight 
 
   <!-- Top Brand Row -->
   <g transform="translate(76, 58)">
-    <rect width="38" height="38" rx="10" fill="#ffcf33"/>
-    <circle cx="17.5" cy="17.5" r="7.5" fill="none" stroke="#181715" stroke-width="3.2"/>
-    <line x1="23" y1="23" x2="29" y2="29" stroke="#181715" stroke-width="3.2" stroke-linecap="round"/>
+    <svg width="38" height="38" viewBox="0 0 460 460">
+      <rect width="460" height="460" rx="102" fill="#ffcf33"/>
+      <path d="M 283.33 301.78 A 106.25 106.25 0 1 1 283.33 158.22" fill="none" stroke="#1b1a18" stroke-width="67.5" stroke-linecap="butt"/>
+      <polygon points="340.5,179 391.5,230 340.5,281 289.5,230" fill="#e0484e"/>
+    </svg>
     <text x="52" y="26" font-family="Geist" font-size="22" font-weight="700" fill="#f2f0ea">Culprit <tspan fill="#8f8b81" font-weight="600">SQL Blog</tspan></text>
   </g>
 

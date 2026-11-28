@@ -8,7 +8,7 @@
         "@astrojs/mdx": "^4.2.4",
         "@astrojs/react": "^4.2.4",
         "@astrojs/rss": "^4.0.11",
-        "@culpritsql/plan-viewer": "^0.6.0",
+        "@culpritsql/plan-viewer": "^0.6.3",
         "@culpritsql/plans": "^0.6.7",
         "astro": "^5.7.10",
         "lucide-react": "^1.16.0",
@@ -90,7 +90,7 @@
 
     "@capsizecss/unpack": ["@capsizecss/unpack@4.0.1", "", { "dependencies": { "fontkitten": "^1.0.3" } }, "sha512-CuNiSqg7+e1cO/GjffyMOm5Tt2jUF9CWHHnvQ/UkqvtkGfHdgwEC0wpmq7fkN3gxwpRnrAN0WzO3vREKmNolMQ=="],
 
-    "@culpritsql/plan-viewer": ["@culpritsql/plan-viewer@0.6.0", "", { "dependencies": { "lucide-react": "1.68.0" }, "peerDependencies": { "react": "^18.0.0 || ^19.0.0" } }, "sha512-gqy6/0iGLFJ2a5jp9iqWk/W0mnm6afJTx2G8Wml4aFGG+w9sDnPMn2x0RfOW1sGkwfD2bEFaosmrAUx+EvxClQ=="],
+    "@culpritsql/plan-viewer": ["@culpritsql/plan-viewer@0.6.3", "", { "dependencies": { "lucide-react": "1.68.0" }, "peerDependencies": { "react": "^18.0.0 || ^19.0.0" } }, "sha512-7FlaM/gvw5Pm1ablJKhyMy9RBfOiaRolhuhXAWV1IB3K/y7z8++YazVgZrv9vLYrHdeUNCGJ8+Cin8pxbNPEWw=="],
 
     "@culpritsql/plans": ["@culpritsql/plans@0.6.7", "", {}, "sha512-dDPFsLAbr+ndV9W0VDJBxxZd5UOqbikmzrZxWMYlksvx1VuvVXytNLz3tNeIVqXR4bleWjm9sID4bRgEF214UQ=="],
 
